@@ -1,9 +1,9 @@
 {
   "name": "escrcpy",
   "type": "module",
-  "version": "3.3.1",
+  "version": "3.4.0",
   "private": true,
-  "packageManager": "pnpm@10.29.2+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa",
+  "packageManager": "pnpm@12.21.0",
   "description": "Scrcpy Powered by Electron",
   "author": "viarotel",
   "homepage": "https://github.com/viarotel-org/escrcpy",
@@ -13,7 +13,6 @@
     "build:electron": "electron-builder --config=./electron-builder.config.js --publish=never",
     "dev": "vite dev",
     "electron-fix": "npx electron-fix start",
-    "locale-sync": "node scripts/locale-sync.js",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
@@ -70,7 +69,6 @@
     "fs-extra": "11.2.0",
     "ga-gtag": "1.2.0",
     "i18next": "25.8.0",
-    "i18next-json-sync": "3.1.2",
     "ip-regex": "5.0.0",
     "lodash-es": "4.17.21",
     "minimist": "1.2.8",

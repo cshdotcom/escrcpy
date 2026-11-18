@@ -20,13 +20,8 @@ export default {
 
   asarUnpack: nativeModuleAsarUnpack,
 
-  extraResources: [
-    {
-      from: '../packages/madb/dist',
-      to: 'extra/common/madb',
-      filter: ['index.mjs'],
-    },
-  ],
+  // NOTE: the madb MCP server package lives in the private upstream repo;
+  // nothing in this tree references it, so no extraResources entry is needed.
 
   win,
   nsis,
@@ -44,7 +39,7 @@ export default {
 
   publish: {
     provider: 'github',
-    owner: 'viarotel-org',
+    owner: 'cshdotcom',
     repo: 'escrcpy',
     updaterCacheDirName: 'escrcpy-updater',
   },
