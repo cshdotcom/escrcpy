@@ -19,8 +19,7 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix"
+    "prepare": "tsdown"
   },
   "peerDependencies": {
     "unocss": ">=60.0.0"

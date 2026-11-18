@@ -86,10 +86,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build renderer (vite build) — zero-error gate
+      - name: Build workspace packages + renderer (turbo build) — zero-error gate
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
-        run: pnpm --filter escrcpy build
+        run: pnpm build
 
       - name: Validate electron-builder config
         env:

@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "tsdown"
   },
   "devDependencies": {
     "@types/node": "20.19.30",
