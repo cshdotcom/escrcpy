@@ -26,12 +26,12 @@ overrides:
   vue-router: 5.2.0
   vue-tsc: 3.1.8
 
-ignoredBuiltDependencies:
-  - esbuild
-  - sharp
-  - vue-demi
-  - electron-winstaller
-
+# pnpm 12 build-script policy: explicitly allow or deny every dependency
+# that ships an install script (unlisted ones make the install fail).
 allowBuilds:
   electron: true
   zod: true
+  esbuild: false
+  sharp: false
+  vue-demi: false
+  electron-winstaller: false
