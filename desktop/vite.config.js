@@ -24,6 +24,7 @@ const alias = {
   $control: resolve('pages/control'),
   $copilot: resolve('pages/copilot'),
   $explorer: resolve('pages/explorer'),
+  $tasks: resolve('pages/tasks'),
   $terminal: resolve('pages/terminal'),
 }
 
@@ -67,6 +68,7 @@ export default defineConfig((args) => {
             control: resolve('pages/control/index.html'),
             copilot: resolve('pages/copilot/index.html'),
             explorer: resolve('pages/explorer/index.html'),
+            tasks: resolve('pages/tasks/index.html'),
             terminal: resolve('pages/terminal/index.html'),
           },
           output: {

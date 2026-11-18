@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.5.0](https://github.com/cshdotcom/escrcpy/compare/v3.4.0...v3.5.0) (2026-11-18)
+
+### Features
+
+* ✨ Scheduled Tasks: a built-in cron scheduler in the Electron main process with three task types — AI tasks, automation actions and workflow tasks — running every 20 seconds with missed-run protection (occurrences overdue by more than 30 minutes are skipped and rescheduled)
+* ✨ AI scheduled tasks: run prompts through the Copilot provider stack (OpenAI-compatible, Anthropic, Gemini, Ollama) on a cron schedule, optionally attaching live device info and screen screenshots for vision models
+* ✨ Automation actions: shell commands (with dangerous-command blocking), tap/swipe/key/text input, app launch, screenshot to the Pictures folder, HTTP webhooks and desktop notifications, executed against a selected device through adbx
+* ✨ Workflows: multi-step pipelines chaining AI steps, device actions and delays with variable injection ({input}, {prev}, {date}, {time}, {timestamp}, {deviceId}), runnable manually or on a schedule
+* ✨ Tasks management UI: a dedicated window with task cards, cron presets with next-run preview, a screenshot-based coordinate picker for tap/swipe, a workflow step editor, unified run history with per-step results, and a control-bar entry
+* ✨ Six-language localization for the scheduler (137 new keys per language, reusing the existing automation vocabulary)
+
 ## [3.4.0](https://github.com/cshdotcom/escrcpy/compare/v3.3.1...v3.4.0) (2026-11-18)
 
 ### Features

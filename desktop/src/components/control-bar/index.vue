@@ -100,6 +100,7 @@ import Rotation from './rotation/index.vue'
 import Screenshot from './screenshot/index.vue'
 import Copilot from './copilot/index.vue'
 import Terminal from './terminal/index.vue'
+import Tasks from './tasks/index.vue'
 import Volume from './volume/index.vue'
 
 export default {
@@ -113,6 +114,7 @@ export default {
     Explorer,
     Terminal,
     Copilot,
+    Tasks,
   },
   props: {
     device: {
@@ -229,6 +231,12 @@ export default {
           fontIcon: 'i-solar-magic-stick-3-bold-duotone',
           component: 'Copilot',
           tips: 'copilot.welcome.title',
+        },
+        tasks: {
+          label: 'device.control.tasks',
+          fontIcon: 'i-solar-calendar-clock-bold-duotone',
+          component: 'Tasks',
+          tips: 'tasks.name',
         },
         gnirehtet: {
           label: 'device.control.gnirehtet',

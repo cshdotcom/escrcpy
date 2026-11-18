@@ -42,6 +42,7 @@ import {
   copilotModule,
   explorerModule,
   mainModule,
+  tasksModule,
   terminalModule,
 } from './modules/index.js'
 
@@ -80,6 +81,7 @@ mainApp.use(shortcutsService)
 mainApp.use(controlModule)
 mainApp.use(copilotModule)
 mainApp.use(explorerModule)
+mainApp.use(tasksModule)
 mainApp.use(terminalModule)
 
 app.whenReady().then(() => {

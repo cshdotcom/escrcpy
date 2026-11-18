@@ -26,9 +26,9 @@
 - 🖥️ **Inset Mirror**: Dedicated embedded window, auto-fits screen resolution and orientation, with integrated one-tap shortcuts
 - ⌨️ **Keyboard Mapping**: Configure touch, joystick, swipe, scroll, and automation mappings directly on the embedded mirror
 - 🔄 **Multi-Device Control**: Control multiple devices simultaneously in a single window, broadcast input, with batch screenshot and APK install support
-- 🎛️ **Integrated Control Bar**: Compact, draggable sidebar with reorderable controls: rotation, screenshot, apps, files, terminal, AI assistant, and automation
+- 🎛️ **Integrated Control Bar**: Compact, draggable sidebar with reorderable controls: rotation, screenshot, apps, files, terminal, AI copilot, and scheduled tasks
 - 🤖 **AI Copilot**: Open-source AI assistant for intelligent Android device control. Supports all major API types (OpenAI-compatible Chat Completions, Anthropic Messages, Google Gemini, Ollama), multi-vendor management (GLM, DeepSeek, Kimi, Qwen, OpenRouter and more), streaming responses, vision-based screen understanding, tool calling with human-in-the-loop confirmation, and persistent chat sessions
-- 🏃 **Automation Script**: Visual step-by-step workflow orchestration with screen image recognition and batch execution across multiple devices
+- ⏰ **Scheduled Tasks**: Built-in cron scheduler with three task types — AI tasks (scheduled prompts with optional device info and live screenshots), automation actions (shell, tap/swipe/key/text input, app launch, screenshot, HTTP webhooks, desktop notifications) and multi-step workflows chaining AI steps, device actions and delays with variable injection. Includes cron presets with next-run preview, run history, missed-run protection and a six-language UI
 - 🪟 **Multi-Device Management**: Visual window orchestration for centralized management of all connected devices
 - 📡 **Wireless Connection**: Wireless ADB connections with LAN auto-discovery and Gnirehtet reverse tethering support
 - 🔑 **Shortcut Management**: Customizable global hotkeys for quick device operations
