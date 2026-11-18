@@ -1,4 +1,5 @@
 import { ipcxMain } from '@escrcpy/electron-ipcx/main'
+import { app } from 'electron'
 
 import {
   AUTOMATION_ACTIONS,
@@ -246,6 +247,37 @@ export default {
       }
     })
 
+    /** Register/unregister Escrcpy as a system login item so scheduled tasks
+     * fire even when the user has not opened the app after boot. */
+    ipcxMain.handle('tasks:set-launch-on-boot', async (_event, payload) => {
+      try {
+        const enabled = Boolean(payload?.enabled)
+        // On macOS, --hidden starts the app minimized to the tray so the user
+        // is not interrupted by a window popping up at every login.
+        app.setLoginItemSettings({
+          openAtLogin: enabled,
+          args: [enabled ? '--hidden' : ''],
+        })
+        console.log(`[Tasks] launch-on-boot ${enabled ? 'enabled' : 'disabled'}`)
+        return ok({ enabled })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_SET_LAUNCH_ON_BOOT')
+      }
+    })
+
+    /** Read back the current system login-item registration so the config
+     * drawer can show the real state, not just the stored preference. */
+    ipcxMain.handle('tasks:get-launch-on-boot', async () => {
+      try {
+        const settings = app.getLoginItemSettings()
+        return ok({ enabled: settings.openAtLogin })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_GET_LAUNCH_ON_BOOT')
+      }
+    })
+
     ipcxMain.handle('tasks:stats', async () => {
       try {
         const tasks = getTasks()
@@ -280,6 +312,8 @@ export default {
         'tasks:runs',
         'tasks:clear-runs',
         'tasks:stats',
+        'tasks:set-launch-on-boot',
+        'tasks:get-launch-on-boot',
         'workflows:list',
         'workflows:save',
         'workflows:delete',

@@ -1,18 +1,149 @@
 name: release
 
+# Replaces the legacy release.yml + release-assets.yml pair with a single
+# workflow that builds for Windows, macOS and Linux, then publishes a GitHub
+# Release with all artifacts attached. Triggered by pushing a v*.*.* tag.
+
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
 
 permissions:
   contents: write
-  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release-please:
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            build_command: build:linux
+          - os: windows-latest
+            platform: win
+            build_command: build:win
+          - os: macos-latest
+            platform: mac
+            build_command: build:mac
+
     steps:
-      - uses: googleapis/release-please-action@v5
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
         with:
-          token: ${{ secrets.GH_TOKEN }}
-          config-file: .release-please-config.json
-          manifest-file: .release-please-manifest.json
+          node-version: 24
+
+      - name: Enable corepack and pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.21.0 --activate
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+          key: pnpm-release-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-release-${{ runner.os }}-
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Flatpak toolchain (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder libudev-dev
+
+          flatpak --user remote-add \
+            --if-not-exists \
+            flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+
+          flatpak --user install \
+            -y \
+            --noninteractive \
+            flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.electronjs.Electron2.BaseApp//25.08
+
+      - name: Build ${{ matrix.platform }}
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm ${{ matrix.build_command }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: |
+            desktop/dist-release/*.exe
+            desktop/dist-release/*.zip
+            desktop/dist-release/*.dmg
+            desktop/dist-release/*.AppImage
+            desktop/dist-release/*.flatpak
+            desktop/dist-release/*.snap
+            desktop/dist-release/*.deb
+            desktop/dist-release/*.rpm
+            desktop/dist-release/*.tar.gz
+            desktop/dist-release/*.blockmap
+            desktop/dist-release/latest*.yml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -lhR release-assets || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            release-assets/*.exe
+            release-assets/*.zip
+            release-assets/*.dmg
+            release-assets/*.AppImage
+            release-assets/*.flatpak
+            release-assets/*.snap
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.tar.gz
+            release-assets/*.blockmap
+            release-assets/latest*.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

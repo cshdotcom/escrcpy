@@ -20,20 +20,40 @@ function loadSettings() {
       vendors[preset.id] = { ...preset, apiKey: '', vision: preset.id === 'glm' || preset.id === 'openai' || preset.id === 'anthropic' || preset.id === 'gemini' }
   }
 
-  return {
+  // Migrate legacy settings that did not include the new autonomous defaults.
+  const merged = {
     ...DEFAULT_SETTINGS,
     ...stored,
     vendors,
   }
+  // Treat negative/missing maxSteps as 0 (unlimited) for safety.
+  if (typeof merged.maxSteps !== 'number' || isNaN(merged.maxSteps) || merged.maxSteps < 0)
+    merged.maxSteps = 0
+
+  return merged
 }
 
 /**
  * The Copilot agent: session management, streaming chat orchestration
  * and tool execution against the selected Android device.
+ *
+ * Sessions are scoped to the window's instanceId (typically the device id the
+ * Copilot window was opened for) so that multiple Copilot windows opened for
+ * different devices no longer share the same conversation list.
  */
 export function useCopilot() {
   const settings = reactive(loadSettings())
-  const sessions = ref(window.$preload.store.get('copilot.sessions') || [])
+  const windowScope = window.$preload.payload?.instanceId || window.$preload.payload?.device?.id || 'default'
+
+  const allSessions = ref(window.$preload.store.get('copilot.sessions') || [])
+  // Only show sessions belonging to this window's scope; legacy sessions
+  // without a scope are kept visible everywhere for backward compatibility.
+  const sessions = computed(() => allSessions.value.filter((session) => {
+    if (!session.scope)
+      return true
+    return session.scope === windowScope
+  }))
+
   const activeSessionId = ref(sessions.value[0]?.id || '')
 
   const isStreaming = ref(false)
@@ -65,11 +85,20 @@ export function useCopilot() {
   })
 
   // ── persistence ─────────────────────────────────────────────
-  watch(() => sessions.value, (value) => {
+  watch(() => allSessions.value, (value) => {
     window.$preload.store.set('copilot.sessions', JSON.parse(JSON.stringify(value)))
   }, { deep: true })
 
   function persistSettings() {
+    // Mirror launchOnBoot into Electron's login-item settings so scheduled
+    // tasks fire even if the user has not opened the app after system boot.
+    try {
+      window.$preload.ipcxRenderer.invoke('tasks:set-launch-on-boot', { enabled: Boolean(settings.launchOnBoot) }).catch(() => {})
+    }
+    catch {
+      // ignore — the IPC may not be available in older hosts
+    }
+
     window.$preload.store.set('copilot.settings', JSON.parse(JSON.stringify({
       ...toRaw(settings),
       vendors: toRaw(settings.vendors),
@@ -80,13 +109,14 @@ export function useCopilot() {
   function createSession(deviceId) {
     const session = {
       id: uid('session'),
+      scope: windowScope,
       name: '',
       deviceId: deviceId || '',
       createdAt: nowISO(),
       updatedAt: nowISO(),
       messages: [],
     }
-    sessions.value.unshift(session)
+    allSessions.value.unshift(session)
     activeSessionId.value = session.id
     return session
   }
@@ -96,35 +126,38 @@ export function useCopilot() {
   }
 
   function deleteSession(id) {
-    const index = sessions.value.findIndex(session => session.id === id)
+    const index = allSessions.value.findIndex(session => session.id === id)
     if (index === -1)
       return
 
-    sessions.value.splice(index, 1)
+    allSessions.value.splice(index, 1)
     if (activeSessionId.value === id)
       activeSessionId.value = sessions.value[0]?.id || ''
   }
 
   function renameSession(id, name) {
-    const session = sessions.value.find(item => item.id === id)
+    const session = allSessions.value.find(item => item.id === id)
     if (session)
       session.name = name
   }
 
   function clearSessionMessages(id) {
-    const session = sessions.value.find(item => item.id === id)
+    const session = allSessions.value.find(item => item.id === id)
     if (session)
       session.messages = []
   }
 
   function clearAllSessions() {
-    sessions.value.forEach((session) => {
-      session.messages = []
+    // Only clear sessions in the current window scope (legacy unscoped ones
+    // are also cleared so the obvious "clear all" button still works).
+    allSessions.value.forEach((session) => {
+      if (!session.scope || session.scope === windowScope)
+        session.messages = []
     })
   }
 
   function deleteMessage(sessionId, messageId) {
-    const session = sessions.value.find(item => item.id === sessionId)
+    const session = allSessions.value.find(item => item.id === sessionId)
     if (!session)
       return
     const index = session.messages.findIndex(message => message.id === messageId)
@@ -315,21 +348,25 @@ export function useCopilot() {
 
       case 'get_ui_layout': {
         const xml = await adb.uiDump(deviceId)
-        return truncate(xml, 12000)
+        context.lastUiLayout = truncate(xml, 12000)
+        return context.lastUiLayout
       }
 
       case 'tap': {
         await adb.input.tap(deviceId, Math.round(args.x), Math.round(args.y))
+        await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'tap', x: args.x, y: args.y })
       }
 
       case 'swipe': {
         await adb.input.swipe(deviceId, Math.round(args.x1), Math.round(args.y1), Math.round(args.x2), Math.round(args.y2), args.duration || 300)
+        await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'swipe', from: [args.x1, args.y1], to: [args.x2, args.y2] })
       }
 
       case 'input_text': {
         await adb.input.text(deviceId, String(args.text ?? ''))
+        await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'input_text', text: args.text })
       }
 
@@ -338,11 +375,15 @@ export function useCopilot() {
         if (!keyCode)
           throw new Error(`Unknown key: ${args.key}`)
         await adb.input.key(deviceId, keyCode)
+        await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'key', key: args.key })
       }
 
       case 'open_app': {
         await adb.deviceShell(deviceId, `monkey -p ${String(args.package).trim()} -c android.intent.category.LAUNCHER 1`)
+        // Give Android a moment to actually display the app before capturing.
+        await new Promise(resolve => setTimeout(resolve, 800))
+        await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'open_app', package: args.package })
       }
 
@@ -351,12 +392,46 @@ export function useCopilot() {
         if (isDangerousShell(command))
           throw new Error(t('copilot.tool.blocked'))
         const output = await adb.deviceShell(deviceId, command)
+        // Shell commands may change device state (e.g. "input tap"), so capture
+        // the screen afterwards to let the model verify the result.
+        if (/\b(input|am|pm|svc|settings|cmd)\b/i.test(command))
+          await capturePostActionContext(context, deviceId)
         return truncate(output, 6000)
       }
 
       default:
         throw new Error(`Unknown tool: ${name}`)
     }
+  }
+
+  /**
+   * After every mutating action, capture a screenshot + UI dump and store them
+   * on the context. The agent loop then attaches them to the next user-facing
+   * tool message so the model can reason about the result without issuing
+   * another screenshot call itself.
+   */
+  async function capturePostActionContext(context, deviceId) {
+    const adb = window.$preload.adb
+    const tasks = []
+
+    if (settings.autoScreenshotAfterAction) {
+      tasks.push(
+        adb.screencap(deviceId, { returnBase64: true })
+          .then((base64) => { context.lastScreenshot = `data:image/png;base64,${base64}` })
+          .catch((error) => console.warn('[Copilot] auto screenshot failed:', error?.message ?? error)),
+      )
+    }
+
+    if (settings.autoUiDumpAfterAction) {
+      tasks.push(
+        Promise.resolve(adb.uiDump(deviceId))
+          .then((xml) => { context.lastUiLayout = truncate(xml, 12000) })
+          .catch((error) => console.warn('[Copilot] auto ui-dump failed:', error?.message ?? error)),
+      )
+    }
+
+    if (tasks.length)
+      await Promise.all(tasks)
   }
 
   // ── message context building ────────────────────────────────
@@ -434,14 +509,31 @@ export function useCopilot() {
     streamingText.value = ''
     streamingSteps.value = 0
 
-    const maxSteps = Math.min(Math.max(Number(settings.maxSteps) || 30, 1), 100)
+    // 0 (or negative) means unlimited — run until the model stops calling tools.
+    const rawMax = Number(settings.maxSteps)
+    const maxSteps = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 0
     const tools = buildToolSchemas({ allowShell: settings.allowShell })
-    const context = { deviceId: session.deviceId, lastScreenshot: null }
+    const context = { deviceId: session.deviceId, lastScreenshot: null, lastUiLayout: null }
 
     try {
       let continueLoop = true
 
-      while (continueLoop && streamingSteps.value < maxSteps) {
+      while (continueLoop && (maxSteps === 0 || streamingSteps.value < maxSteps)) {
+        // Honors user-initiated abort between iterations, not only mid-request.
+        if (currentRequestAborted) {
+          if (streamingText.value) {
+            session.messages.push({
+              id: uid('msg'),
+              role: 'assistant',
+              content: streamingText.value,
+              stopped: true,
+              createdAt: nowISO(),
+            })
+          }
+          lastError.value = t('copilot.stopped')
+          break
+        }
+
         streamingSteps.value++
         streamingText.value = ''
 
@@ -471,12 +563,28 @@ export function useCopilot() {
           break
         }
 
-        // Persist the assistant reply (with any tool calls it requested)
+        // Persist the assistant reply (with any tool calls it requested).
+        // If the model returned empty text AND no tool calls, surface a visible
+        // placeholder so the user sees something happened instead of a blank turn.
+        const assistantText = result.message.content || ''
+        const toolCalls = result.message.tool_calls || []
+        if (!assistantText.trim() && !toolCalls.length) {
+          session.messages.push({
+            id: uid('msg'),
+            role: 'assistant',
+            content: t('copilot.tool.noResult'),
+            usage: result.usage,
+            createdAt: nowISO(),
+          })
+          touchSession(session)
+          break
+        }
+
         const assistantMessage = {
           id: uid('msg'),
           role: 'assistant',
-          content: result.message.content || '',
-          tool_calls: result.message.tool_calls || [],
+          content: assistantText,
+          tool_calls: toolCalls,
           usage: result.usage,
           createdAt: nowISO(),
         }
@@ -484,12 +592,26 @@ export function useCopilot() {
         streamingText.value = ''
         touchSession(session)
 
-        const toolCalls = result.message.tool_calls || []
         if (!toolCalls.length)
           break
 
-        // Execute each tool call, then feed results back to the model
+        // Execute each tool call, then feed results back to the model.
         for (const call of toolCalls) {
+          // Honor abort between tool calls within a single assistant turn —
+          // previously stop only took effect after the next chat request.
+          if (currentRequestAborted) {
+            session.messages.push({
+              id: uid('msg'),
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.function?.name || 'unknown',
+              content: JSON.stringify({ error: t('copilot.stopped'), aborted: true }),
+              status: 'aborted',
+              createdAt: nowISO(),
+            })
+            continue
+          }
+
           const toolName = call.function?.name || 'unknown'
           const args = safeParse(call.function?.arguments)
 
@@ -523,19 +645,18 @@ export function useCopilot() {
             toolMessage.content = await executeTool(toolName, args, context)
             toolMessage.status = 'completed'
 
-            // Attach the captured screenshot to the conversation for vision models.
-            if (toolName === 'screenshot' && context.lastScreenshot && activeVendor.value?.vision) {
-              let target = null
-              for (let i = session.messages.length - 1; i >= 0; i--) {
-                if (session.messages[i].role === 'user') {
-                  target = session.messages[i]
-                  break
-                }
-              }
-              if (target)
-                target.images = [...(target.images || []).slice(-1), context.lastScreenshot]
-              else
-                toolMessage.image = context.lastScreenshot
+            // Attach the most recent auto-captured screenshot (set either by an
+            // explicit screenshot tool call or by capturePostActionContext)
+            // to the tool message so vision-capable models can see what
+            // happened. For non-vision models we append a short UI dump
+            // breadcrumb to the tool content so they can still reason about it.
+            if (context.lastScreenshot && activeVendor.value?.vision)
+              toolMessage.image = context.lastScreenshot
+
+            if (context.lastUiLayout && !activeVendor.value?.vision) {
+              const note = `\n[auto ui-dump]\n${context.lastUiLayout.slice(0, 4000)}`
+              if (!String(toolMessage.content).includes('[auto ui-dump]'))
+                toolMessage.content = `${String(toolMessage.content)}${note}`
             }
           }
           catch (error) {
@@ -548,7 +669,7 @@ export function useCopilot() {
 
         // Loop continues so the model can react to the tool results,
         // unless the step limit was just reached.
-        if (streamingSteps.value >= maxSteps) {
+        if (maxSteps > 0 && streamingSteps.value >= maxSteps) {
           stepLimitReached.value = true
           continueLoop = false
         }

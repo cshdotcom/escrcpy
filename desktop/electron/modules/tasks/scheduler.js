@@ -5,10 +5,17 @@
  * Missed-run policy: if a task is overdue by more than 30 minutes (the app
  * was closed at the scheduled time), the occurrence is skipped and the next
  * run is recomputed instead of firing a burst of stale executions.
+ *
+ * Window reveal: when a task fires and no visible BrowserWindow exists, the
+ * main window is restored so the user can see what happened. This, combined
+ * with the launchOnBoot setting (registered via tasks:set-launch-on-boot),
+ * lets scheduled tasks run even if the user has not opened the app this boot.
  */
+import { BrowserWindow } from 'electron'
 import { executeTask } from './helpers/executor.js'
 import { getTasks, patchTask } from './helpers/store.js'
 import { computeNextRunAt } from './helpers/schedule-helper.js'
+import electronStore from '$electron/helpers/store/index.js'
 
 const TICK_INTERVAL_MS = 20_000
 const STARTUP_DELAY_MS = 8_000
@@ -16,6 +23,32 @@ const MISSED_WINDOW_MS = 30 * 60 * 1000
 
 let timer = null
 let ticking = false
+
+/** Reveal the main window if no visible window currently exists. Called when
+ * a scheduled task fires so the user can see the run history update even if
+ * the app was hidden to the tray. */
+function revealMainWindowIfNeeded() {
+  if (electronStore.get('copilot.settings.revealWindowOnTaskFire') === false)
+    return
+
+  try {
+    const visible = BrowserWindow.getAllWindows().some(win => win.isVisible() && !win.isDestroyed())
+    if (visible)
+      return
+
+    const main = BrowserWindow.getAllWindows().find(win => !win.isDestroyed())
+    if (main) {
+      if (main.isMinimized())
+        main.restore()
+      if (!main.isVisible())
+        main.show()
+      main.focus()
+    }
+  }
+  catch (error) {
+    console.warn('[Tasks] reveal window failed:', error?.message ?? error)
+  }
+}
 
 export function tickTasks() {
   if (ticking)
@@ -42,6 +75,9 @@ export function tickTasks() {
           console.log(`[Tasks] Skipped missed occurrence of "${task.name}"`)
           continue
         }
+
+        if (executed === 0)
+          revealMainWindowIfNeeded()
 
         await executeTask(task, 'schedule')
         executed++

@@ -161,10 +161,15 @@
         <el-form label-position="top" size="small" @submit.prevent>
           <el-form-item :label="$t('copilot.config.maxSteps')">
             <div class="flex flex-col gap-1 w-full">
+              <div class="flex items-center gap-2">
+                <el-switch v-model="stepsUnlimited" @change="handleStepsUnlimitedChange" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.maxStepsUnlimitedHint') }}</span>
+              </div>
               <el-slider
+                v-if="!stepsUnlimited"
                 v-model="settings.maxSteps"
                 :min="1"
-                :max="100"
+                :max="200"
                 :step="1"
                 show-input
                 :show-input-controls="false"
@@ -172,6 +177,39 @@
                 @change="persist"
               />
               <span class="text-xs text-gray-400">{{ $t('copilot.config.maxStepsHint') }}</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="$t('copilot.config.autonomous')">
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.requireConfirm" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.requireConfirmHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.autoScreenshotAfterAction" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.autoScreenshotHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.autoUiDumpAfterAction" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.autoUiDumpHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.retryOnFailure" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.retryHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.allowShell" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.allowShellHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.streaming" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.streamHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.launchOnBoot" @change="handleLaunchOnBootChange" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.launchOnBootHint') }}</span>
+              </div>
             </div>
           </el-form-item>
 
@@ -183,23 +221,6 @@
               :placeholder="$t('copilot.config.systemPromptPlaceholder')"
               @change="persist"
             />
-          </el-form-item>
-
-          <el-form-item :label="$t('copilot.config.requireConfirm')">
-            <div class="flex flex-col gap-1">
-              <div class="flex items-center gap-2">
-                <el-switch v-model="settings.requireConfirm" @change="persist" />
-                <span class="text-xs text-gray-400">{{ $t('copilot.config.requireConfirmHint') }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <el-switch v-model="settings.allowShell" @change="persist" />
-                <span class="text-xs text-gray-400">{{ $t('copilot.config.allowShellHint') }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <el-switch v-model="settings.streaming" @change="persist" />
-                <span class="text-xs text-gray-400">{{ $t('copilot.config.streamHint') }}</span>
-              </div>
-            </div>
           </el-form-item>
         </el-form>
 
@@ -251,6 +272,33 @@ const { t } = useI18n()
 
 const copilot = props.copilot
 const settings = copilot.settings
+
+// maxSteps = 0 means unlimited — expose a friendly switch for that mode.
+const stepsUnlimited = computed({
+  get: () => Number(settings.maxSteps) <= 0,
+  set: () => {},
+})
+
+function handleStepsUnlimitedChange(value) {
+  settings.maxSteps = value ? 0 : 30
+  persist()
+}
+
+async function handleLaunchOnBootChange(value) {
+  // Persist first so the IPC handler can read the desired state.
+  settings.launchOnBoot = value
+  persist()
+  try {
+    const result = await window.$preload.ipcxRenderer.invoke('tasks:set-launch-on-boot', { enabled: value })
+    if (result?.success)
+      ElMessage.success(value ? t('copilot.config.launchOnBootOn') : t('copilot.config.launchOnBootOff'))
+    else if (result?.error)
+      ElMessage.warning(result.error.message || t('copilot.config.launchOnBootFailed'))
+  }
+  catch (error) {
+    ElMessage.warning(error?.message || t('copilot.config.launchOnBootFailed'))
+  }
+}
 
 const presets = VENDOR_PRESETS
 const apiTypeOptions = API_TYPE_OPTIONS
@@ -402,10 +450,14 @@ function handleReset() {
     type: 'warning',
   }).then(() => {
     Object.assign(settings, {
-      maxSteps: 30,
-      requireConfirm: true,
-      streaming: true,
+      maxSteps: 0,
+      requireConfirm: false,
+      autoScreenshotAfterAction: true,
+      autoUiDumpAfterAction: true,
+      retryOnFailure: true,
       allowShell: true,
+      streaming: true,
+      launchOnBoot: settings.launchOnBoot, // don't silently flip OS login state
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
     })
     persist()

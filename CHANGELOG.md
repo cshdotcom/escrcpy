@@ -13,6 +13,19 @@
 
 ## [3.4.0](https://github.com/cshdotcom/escrcpy/compare/v3.3.1...v3.4.0) (2026-11-18)
 
+### Features — Autonomous Agent Refresh
+
+* ✨ **Disable high-risk confirmation by default**: the tool-confirm dialog now defaults to off so the agent runs autonomously without interrupting the user on every tap/swipe/shell. It can still be re-enabled from the Copilot config drawer.
+* ✨ **Unlimited step mode**: `maxSteps = 0` lets the agent loop until it naturally finishes instead of being capped at 100 turns. A friendly "Unlimited" switch was added to the config drawer.
+* ✨ **Auto-feed results to the AI after every action**: after `tap`, `swipe`, `key`, `input_text`, `open_app` and state-changing `shell` commands, the system automatically captures a screenshot AND a UI hierarchy dump and attaches them to the next tool message. Vision-capable models see the screenshot; text-only models get the UI dump inline. The AI no longer needs to call `screenshot`/`get_ui_layout` manually after each action — it can "think for itself".
+* ✨ **Retry-on-failure for AI calls**: transient errors (network, rate-limit, 5xx) are retried with exponential backoff up to 3 times so scheduled AI tasks run to completion instead of stopping at the first hiccup.
+* ✨ **Boot-time launch**: `app.setLoginItemSettings` registers Escrcpy as a system login item so scheduled tasks fire even if the user has not opened the app after boot. Toggled from the Copilot config drawer via the new `tasks:set-launch-on-boot` IPC.
+* ✨ **Reveal window on task fire**: when a scheduled task fires and no visible BrowserWindow exists, the main window is restored so the user can see what happened.
+* ✨ **Session stop now takes effect immediately**: the abort flag is checked between tool executions within a single assistant turn, not only between chat requests.
+* ✨ **Multi-window session isolation**: Copilot sessions are now scoped by the window's `instanceId` (the device id the window was opened for), so two Copilot windows opened for different devices no longer share the same conversation list.
+* ✨ **Empty output is no longer fatal**: when the model returns empty text and no tool calls, a visible placeholder is shown instead of throwing and marking the run as failed.
+* ✨ **Resilient control-bar triggers**: the Tasks/Copilot control-bar buttons now surface a warning if no device is selected and catch `win.open` failures, instead of silently doing nothing.
+
 ### Features
 
 * ✨ Rebuild the AI Copilot as a fully open implementation: multi-provider LLM chat with OpenAI-compatible (Chat Completions), Anthropic Messages, Google Gemini and Ollama protocols

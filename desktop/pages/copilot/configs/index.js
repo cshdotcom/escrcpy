@@ -98,11 +98,28 @@ export const DEFAULT_SYSTEM_PROMPT = [
 
 export const DEFAULT_SETTINGS = {
   activeVendorId: 'glm',
-  maxSteps: 30,
-  requireConfirm: true,
+  // 0 means unlimited — the agent loop runs until the model stops calling tools
+  maxSteps: 0,
+  // Disabled by default: high-risk tool confirmation interrupts the autonomous
+  // agent loop and was reported as the main friction when running long tasks.
+  requireConfirm: false,
   streaming: true,
   allowShell: true,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  // Auto-feed device state back to the model after every mutating action
+  // (tap/swipe/key/input_text/open_app/shell) so the agent can "think for itself"
+  // without manually calling screenshot/get_ui_layout each turn.
+  autoScreenshotAfterAction: true,
+  autoUiDumpAfterAction: true,
+  // Retry AI calls on transient failures so scheduled tasks run to completion.
+  retryOnFailure: true,
+  maxRetries: 3,
+  // Auto-launch Escrcpy on OS startup so scheduled tasks fire even if the user
+  // has not opened the app manually. Toggled from the Copilot config drawer.
+  launchOnBoot: false,
+  // When a scheduled task fires and no window is visible, restore the main
+  // window so the user can see what happened.
+  revealWindowOnTaskFire: true,
 }
 
 /** Android key codes exposed to the model. */
@@ -141,7 +158,7 @@ export function buildToolSchemas(options = {}) {
       type: 'function',
       function: {
         name: 'screenshot',
-        description: 'Capture the current device screen. The image is attached to the conversation when the model supports vision; otherwise only the image size is reported.',
+        description: 'Capture the current device screen. The image is attached to the conversation when the model supports vision; otherwise only the image size is reported. After every mutating action (tap, swipe, key, input_text, open_app, shell) the system also auto-attaches a fresh screenshot and UI dump, so you usually do NOT need to call this manually right after an action.',
         parameters: { type: 'object', properties: {} },
       },
     },

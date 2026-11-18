@@ -242,10 +242,43 @@ async function collectAiText(config, messages) {
     },
   })
 
+  // Don't throw on empty response — surface a visible placeholder instead so
+  // the run history shows something useful and the task is not marked failed.
   if (!text.trim())
-    throw new Error('The model returned an empty response')
+    text = '(The model returned an empty response. Check the vendor configuration and try again.)'
 
   return text
+}
+
+/** Retry wrapper for AI calls. Transient failures (network, rate-limit, server
+ * errors) are retried with exponential backoff so scheduled tasks run to
+ * completion instead of stopping at the first hiccup. */
+async function callAiWithRetry(config, messages, options = {}) {
+  const maxRetries = Number(options.maxRetries) || 0
+  const retryable = options.retryable !== false
+
+  let lastError = null
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await collectAiText(config, messages)
+    }
+    catch (error) {
+      lastError = error
+      if (!retryable || attempt === maxRetries)
+        break
+
+      // Don't retry on auth/config errors — they won't fix themselves.
+      const code = error?.code || ''
+      if (['INVALID_API_KEY', 'INVALID_MODEL', 'CONFIG_INCOMPLETE'].includes(code))
+        break
+
+      const backoff = Math.min(1000 * 2 ** attempt, 8000)
+      console.warn(`[Tasks] AI call attempt ${attempt + 1} failed: ${error?.message ?? error}. Retrying in ${backoff}ms`)
+      await new Promise(resolve => setTimeout(resolve, backoff))
+    }
+  }
+
+  throw lastError
 }
 
 /** Extra device context blocks for the AI prompt. */
@@ -332,7 +365,16 @@ export async function runAiPrompt(config = {}) {
     content: userParts.length === 1 ? promptText : userParts,
   })
 
-  const text = await collectAiText(vendorConfig, messages)
+  // Retry up to N times on transient failures so a scheduled AI task keeps
+  // running toward completion. The maxRetries is read from the persisted
+  // copilot settings (set via the Copilot config drawer) and defaults to 3.
+  const maxRetries = Number(electronStore.get('copilot.settings.maxRetries')) || 3
+  const retryOnFailure = electronStore.get('copilot.settings.retryOnFailure') !== false
+
+  const text = await callAiWithRetry(vendorConfig, messages, {
+    maxRetries: retryOnFailure ? maxRetries : 0,
+    retryable: retryOnFailure,
+  })
   return { output: text }
 }
 
