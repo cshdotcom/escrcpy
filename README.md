@@ -27,7 +27,7 @@
 - ⌨️ **Keyboard Mapping**: Configure touch, joystick, swipe, scroll, and automation mappings directly on the embedded mirror
 - 🔄 **Multi-Device Control**: Control multiple devices simultaneously in a single window, broadcast input, with batch screenshot and APK install support
 - 🎛️ **Integrated Control Bar**: Compact, draggable sidebar with reorderable controls: rotation, screenshot, apps, files, terminal, AI assistant, and automation
-- 🤖 **Copilot**: AI assistant built on MCP protocol for intelligent Android device control with multi-model chat support
+- 🤖 **AI Copilot**: Open-source AI assistant for intelligent Android device control. Supports all major API types (OpenAI-compatible Chat Completions, Anthropic Messages, Google Gemini, Ollama), multi-vendor management (GLM, DeepSeek, Kimi, Qwen, OpenRouter and more), streaming responses, vision-based screen understanding, tool calling with human-in-the-loop confirmation, and persistent chat sessions
 - 🏃 **Automation Script**: Visual step-by-step workflow orchestration with screen image recognition and batch execution across multiple devices
 - 🪟 **Multi-Device Management**: Visual window orchestration for centralized management of all connected devices
 - 📡 **Wireless Connection**: Wireless ADB connections with LAN auto-discovery and Gnirehtet reverse tethering support

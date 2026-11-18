@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.4.0](https://github.com/cshdotcom/escrcpy/compare/v3.3.1...v3.4.0) (2026-11-18)
+
+### Features
+
+* ✨ Rebuild the AI Copilot as a fully open implementation: multi-provider LLM chat with OpenAI-compatible (Chat Completions), Anthropic Messages, Google Gemini and Ollama protocols
+* ✨ Streaming chat with tool calling: the AI can inspect and control the connected Android device (screenshot, UI layout dump, tap, swipe, text input, key press, open app, shell) with human-in-the-loop confirmation and dangerous-command blocking
+* ✨ Vision support: attach device screenshots to the conversation for screen understanding with vision-capable models
+* ✨ Multi-vendor management with 11 built-in presets (GLM, DeepSeek, OpenAI, Kimi, Qwen, OpenRouter, SiliconFlow, Anthropic, Gemini, Ollama, LM Studio), model list fetching, connection testing and config import/export
+* ✨ Persistent chat sessions, quick prompts, system prompt customization, temperature/max-steps/token controls and six-language localization (210 copilot keys)
+
+### Bug Fixes
+
+* 🐛 Fix electron-builder packaging failure caused by a missing madb extraResources entry
+* 🐛 Fix broken root scripts (lang-sync, docs build) that referenced dependencies only declared in the desktop package
+* 🐛 Fix vitepress-sidebar/qsu and ga-gtag resolution failures that broke the docs build
+* 🐛 Add missing tsdown devDependency to unocss-preset-shades so the workspace builds standalone
+* 🐛 Align the packageManager field with the lockfile (pnpm 12) and commit pnpm-lock.yaml for reproducible CI builds
+
 ## [3.3.1](https://github.com/viarotel/escrcpy-x/compare/v3.3.0...v3.3.1) (2026-10-10)
 
 

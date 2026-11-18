@@ -2,16 +2,6 @@ name: sync-release-to-public
 
 on:
   workflow_dispatch:
-    inputs:
-      source_tag:
-        description: Private repository release tag to sync. Leave empty to sync the latest release.
-        required: false
-        type: string
-      target_repository:
-        description: Target public repository in owner/repo format
-        required: true
-        default: viarotel-org/escrcpy
-        type: string
 
 permissions:
   contents: read

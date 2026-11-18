@@ -15,15 +15,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             platform: linux
             build_command: build:linux
-
-          - os: macos-latest
-            platform: mac
-            build_command: build:mac
 
           - os: windows-latest
             platform: win
@@ -44,7 +41,7 @@ jobs:
       - name: Enable corepack and pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@10.29.2 --activate
+          corepack prepare pnpm@12.21.0 --activate
 
       - name: Setup pnpm cache
         uses: actions/cache@v6
