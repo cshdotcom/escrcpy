@@ -98,6 +98,7 @@ import Explorer from './explorer/index.vue'
 import Gnirehtet from './gnirehtet/index.vue'
 import Rotation from './rotation/index.vue'
 import Screenshot from './screenshot/index.vue'
+import Copilot from './copilot/index.vue'
 import Terminal from './terminal/index.vue'
 import Volume from './volume/index.vue'
 
@@ -111,6 +112,7 @@ export default {
     Volume,
     Explorer,
     Terminal,
+    Copilot,
   },
   props: {
     device: {
@@ -221,6 +223,12 @@ export default {
           label: 'device.terminal.name',
           fontIcon: 'i-bi-terminal',
           component: 'Terminal',
+        },
+        copilot: {
+          label: 'device.control.copilot',
+          fontIcon: 'i-solar-magic-stick-3-bold-duotone',
+          component: 'Copilot',
+          tips: 'copilot.welcome.title',
         },
         gnirehtet: {
           label: 'device.control.gnirehtet',

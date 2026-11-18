@@ -502,6 +502,33 @@ async function killProcesses() {
   return processManager.kill()
 }
 
+/** Device input primitives backed by adbx (yadb when available, e.g. non-ASCII text input). */
+const input = {
+  tap: (id, x, y) => getAdbx().input.tap(id, x, y),
+  swipe: (id, x1, y1, x2, y2, duration) => getAdbx().input.swipe(id, x1, y1, x2, y2, duration),
+  longPress: (id, x, y, duration) => getAdbx().input.longPress(id, x, y, duration),
+  drag: (id, x1, y1, x2, y2, duration) => getAdbx().input.drag(id, x1, y1, x2, y2, duration),
+  text: (id, text) => getAdbx().input.text(id, text),
+  key: (id, keyCode) => getAdbx().input.key(id, keyCode),
+}
+
+/** Dump the current UI hierarchy XML for AI screen understanding. */
+function uiDump(id) {
+  return getAdbx().ui.dumpLayout(id)
+}
+
+const deviceInfo = {
+  getScreenSize: id => getAdbx().deviceInfo.getScreenSize(id),
+  battery: id => getAdbx().deviceInfo.battery(id),
+  getProperty: (id, prop) => getAdbx().deviceInfo.getProperty(id, prop),
+  getBatteryLevel: id => getAdbx().deviceInfo.getBatteryLevel(id),
+}
+
+const clipboard = {
+  read: id => getAdbx().clipboard.read(id),
+  write: (id, text) => getAdbx().clipboard.write(id, text),
+}
+
 export default {
   shell,
   init,
@@ -531,4 +558,8 @@ export default {
   waitForDevice,
   getSerialNo,
   killProcesses,
+  input,
+  uiDump,
+  deviceInfo,
+  clipboard,
 }

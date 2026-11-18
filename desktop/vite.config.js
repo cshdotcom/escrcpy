@@ -22,6 +22,7 @@ const alias = {
   $renderer: resolve('src'),
   $electron: resolve('electron'),
   $control: resolve('pages/control'),
+  $copilot: resolve('pages/copilot'),
   $explorer: resolve('pages/explorer'),
   $terminal: resolve('pages/terminal'),
 }
@@ -64,6 +65,7 @@ export default defineConfig((args) => {
           input: {
             main: resolve('index.html'),
             control: resolve('pages/control/index.html'),
+            copilot: resolve('pages/copilot/index.html'),
             explorer: resolve('pages/explorer/index.html'),
             terminal: resolve('pages/terminal/index.html'),
           },

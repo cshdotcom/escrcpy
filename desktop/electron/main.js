@@ -39,6 +39,7 @@ import {
 
 import {
   controlModule,
+  copilotModule,
   explorerModule,
   mainModule,
   terminalModule,
@@ -77,6 +78,7 @@ mainApp.use(launchService)
 mainApp.use(shortcutsService)
 
 mainApp.use(controlModule)
+mainApp.use(copilotModule)
 mainApp.use(explorerModule)
 mainApp.use(terminalModule)
 
