@@ -55,7 +55,7 @@
 
           <div v-if="cronPreview.valid && cronPreview.next.length" class="w-full mt-1.5 text-xs text-gray-400 dark:text-gray-500">
             <div class="flex items-center gap-1">
-              <i class="i-solar-next-square-linear" />
+              <i class="i-solar-clock-circle-linear" />
               <span>{{ $t('tasks.cron.nextRuns') }}:</span>
               <span class="text-gray-500 dark:text-gray-400">
                 {{ cronPreview.next.map(time => formatDateTime(time)).join('  ·  ') }}

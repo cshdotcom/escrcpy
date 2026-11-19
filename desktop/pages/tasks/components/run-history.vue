@@ -26,7 +26,7 @@
           <el-table-column prop="refName" :label="$t('tasks.history.name')" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="inline-flex items-center gap-1.5">
-                <i :class="row.kind === 'workflow' ? 'i-solar-route-linear' : 'i-solar-calendar-clock-linear'" class="opacity-60" />
+                <i :class="row.kind === 'workflow' ? 'i-solar-route-linear' : 'i-solar-alarm-linear'" class="opacity-60" />
                 {{ row.refName }}
               </span>
             </template>

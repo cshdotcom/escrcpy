@@ -161,12 +161,16 @@ export const windowIPCPlugin: Plugin<void, WindowIPCPluginOptions> = {
     // Open window by manager ID
     if (open) {
       const channel = `${channelPrefix}-open`
-      ipcxMain.handle(channel, (_event: IpcMainInvokeEvent, payload: { id: string, options?: unknown } = { id: '' }) => {
+      ipcxMain.handle(channel, async (_event: IpcMainInvokeEvent, payload: { id: string, options?: unknown } = { id: '' }) => {
         const { id, options: openOptions } = payload
         if (!id) {
           return false
         }
-        const win = mainApp.openWindow(id, openOptions)
+        // Await the (async) manager so the renderer gets the real outcome
+        // instead of an always-false value. Window creation still proceeds
+        // even if this handler raced a second open call.
+        const manager = mainApp.getWindowManager(id)
+        const win = await manager?.open?.(openOptions as any)
         return Boolean(win)
       })
       channels.push(channel)

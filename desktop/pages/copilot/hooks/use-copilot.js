@@ -629,7 +629,10 @@ export function useCopilot() {
             continue
           }
 
-          const toolMessage = {
+          // Wrap in reactive() so later status/content mutations trigger UI
+          // updates — mutating a plain object pushed into a reactive array
+          // leaves the tool card stuck on "running" forever.
+          const toolMessage = reactive({
             id: uid('msg'),
             role: 'tool',
             tool_call_id: call.id,
@@ -638,7 +641,7 @@ export function useCopilot() {
             content: '',
             status: 'running',
             createdAt: nowISO(),
-          }
+          })
           session.messages.push(toolMessage)
 
           try {

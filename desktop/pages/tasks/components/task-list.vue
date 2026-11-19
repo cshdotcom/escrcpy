@@ -42,14 +42,14 @@
 
             <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
               <span class="inline-flex items-center gap-1">
-                <i class="i-solar-calendar-clock-linear opacity-60" />
+                <i class="i-solar-alarm-linear opacity-60" />
                 <el-tooltip :content="task.cronExpr" placement="top">
                   <span><CronLabel :expr="task.cronExpr" /></span>
                 </el-tooltip>
               </span>
 
               <span class="inline-flex items-center gap-1">
-                <i class="i-solar-next-square-linear opacity-60" />
+                <i class="i-solar-clock-circle-linear opacity-60" />
                 {{ task.enabled === false ? '—' : formatDateTime(task.nextRunAt) }}
               </span>
 
@@ -92,7 +92,7 @@
 
         <div v-if="!filteredTasks.length" class="flex-1 flex flex-col items-center justify-center py-14 gap-3">
           <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-2xl shadow-lg shadow-blue-500/20">
-            <i class="i-solar-calendar-clock-bold-duotone" />
+            <i class="i-solar-alarm-bold-duotone" />
           </div>
           <div class="text-center">
             <div class="text-sm font-medium">{{ $t('tasks.empty.title') }}</div>
@@ -133,7 +133,7 @@ const filteredTasks = computed(() => {
 
 function typeIcon(type) {
   const hit = TASK_TYPES.find(item => item.value === type)
-  return hit?.icon || 'i-solar-calendar-clock-bold-duotone'
+  return hit?.icon || 'i-solar-alarm-bold-duotone'
 }
 
 function typeIconClass(type) {

@@ -144,8 +144,8 @@ const statusIconClass = computed(() => {
     case 'input_text': return 'i-solar-keyboard-linear text-green-500'
     case 'key': return 'i-solar-key-square-linear text-green-500'
     case 'open_app': return 'i-solar-rocket-linear text-orange-500'
-    case 'shell': return 'i-solar-terminal-linear text-gray-500'
-    default: return 'i-solar-wrench-linear text-gray-500'
+    case 'shell': return 'i-bi-terminal text-gray-500'
+    default: return 'i-bi-wrench text-gray-500'
   }
 })
 </script>

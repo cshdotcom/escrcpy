@@ -234,7 +234,7 @@ export default {
         },
         tasks: {
           label: 'device.control.tasks',
-          fontIcon: 'i-solar-calendar-clock-bold-duotone',
+          fontIcon: 'i-solar-alarm-bold-duotone',
           component: 'Tasks',
           tips: 'tasks.name',
         },

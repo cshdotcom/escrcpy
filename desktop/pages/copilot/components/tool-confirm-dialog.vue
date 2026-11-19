@@ -10,7 +10,7 @@
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2 text-sm font-medium">
         <span class="text-lg text-blue-500">
-          <i class="i-solar-wrench-linear" />
+          <i class="i-bi-wrench" />
         </span>
         {{ toolName }}
       </div>

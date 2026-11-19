@@ -41,7 +41,7 @@
           <el-tab-pane name="tasks">
             <template #label>
               <span class="flex items-center gap-1">
-                <i class="i-solar-calendar-clock-linear" />
+                <i class="i-solar-alarm-linear" />
                 {{ $t('tasks.tab.tasks') }}
               </span>
             </template>

@@ -96,6 +96,12 @@ jobs:
         # release.yml workflow on tagged commits instead.
         run: pnpm exec turbo build
 
+      - name: Icon integrity gate (no invisible buttons)
+        # Every i-* icon class used in source must exist in the built CSS.
+        # Guards against icon names that silently fail to generate (the
+        # "transparent button without an icon" regression from v3.4.0).
+        run: node scripts/check-icons.js
+
       - name: Smoke-test electron-builder config (skip platform targets)
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
