@@ -269,6 +269,34 @@ async function onAdbWatch(type, ret) {
   }
 }
 
+// ── lightweight device-state polling ────────────────────
+// The adb tracker (above) is the primary update source, but it can miss state
+// flips (device⇄offline arrives as 'change') or go deaf when the tracker
+// socket breaks. This raw poll (no enrichment shell calls) compares a cheap
+// signature and only triggers a full refresh when the state actually changed,
+// so a device that flapped to "offline" self-heals in the UI without the user
+// unplugging and replugging it.
+let devicePollTimer = null
+let lastRawSignature = null
+
+async function pollDeviceStatus() {
+  if (document.hidden)
+    return
+
+  try {
+    const raw = await window.$preload.adb.getRawDeviceList()
+    const signature = (raw || []).map(device => `${device.id}:${device.type}`).sort().join('|')
+
+    if (lastRawSignature !== null && signature !== lastRawSignature)
+      getDeviceData({ unloading: true })
+
+    lastRawSignature = signature
+  }
+  catch {
+    // adb hiccup — tracker reconnect + health check handle recovery
+  }
+}
+
 let autoMirrorTimer
 let autoMirrorLock = false
 async function getMirrorActionRefs(ref) {
@@ -327,10 +355,15 @@ let unAdbWatch = null
 onMounted(async () => {
   await getDeviceData()
   unAdbWatch = await window.$preload.adb.watch(onAdbWatch)
+  devicePollTimer = setInterval(pollDeviceStatus, 5000)
 })
 
 onBeforeUnmount(() => {
   unAdbWatch?.()
+  if (devicePollTimer) {
+    clearInterval(devicePollTimer)
+    devicePollTimer = null
+  }
 })
 
 onActivated(() => {

@@ -155,6 +155,18 @@
                 @click="handleSend()"
               />
             </div>
+
+            <!-- Context usage indicator: shows how close the conversation is
+                 to the compaction threshold, so users trust the auto-compact -->
+            <div
+              v-if="contextUsage > 0.4"
+              class="mt-1.5 text-[10px] leading-none flex items-center gap-1"
+              :class="contextUsage > 0.9 ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'"
+            >
+              <i class="i-solar-database-linear text-[11px]" />
+              <span>{{ $t('copilot.context.usage', { percent: Math.round(contextUsage * 100) }) }}</span>
+              <span v-if="settings.autoCompact !== false">· {{ $t('copilot.context.autoCompactOn') }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -192,6 +204,7 @@ const {
   stepLimitReached,
   lastError,
   pendingConfirm,
+  contextUsage,
 } = copilot
 
 const deviceStore = useDeviceStore()

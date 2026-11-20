@@ -1,4 +1,5 @@
 import { buildToolSchemas, DEFAULT_SETTINGS, isDangerousShell, KEY_EVENTS, VENDOR_PRESETS } from '../configs/index.js'
+import { buildApiMessages, compactSessionContext, estimateTokens } from '@escrcpy/shared'
 
 const { t } = useI18n()
 
@@ -27,8 +28,13 @@ function loadSettings() {
     vendors,
   }
   // Treat negative/missing maxSteps as 0 (unlimited) for safety.
-  if (typeof merged.maxSteps !== 'number' || isNaN(merged.maxSteps) || merged.maxSteps < 0)
+  if (!Number.isFinite(merged.maxSteps) || merged.maxSteps < 0)
     merged.maxSteps = 0
+  const contextWindow = Number(merged.contextWindow)
+  if (!Number.isFinite(contextWindow) || contextWindow < 4000)
+    merged.contextWindow = 32000
+  else
+    merged.contextWindow = contextWindow
 
   return merged
 }
@@ -86,7 +92,22 @@ export function useCopilot() {
 
   // ── persistence ─────────────────────────────────────────────
   watch(() => allSessions.value, (value) => {
-    window.$preload.store.set('copilot.sessions', JSON.parse(JSON.stringify(value)))
+    try {
+      const serialized = JSON.parse(JSON.stringify(value))
+
+      // The main-process task executor also writes `copilot.sessions` (task
+      // conversations with `taskId`). Merge those in so a stale in-memory
+      // copy from this window never clobbers a session another process just
+      // wrote — and so renderer-side deletions never resurrect them.
+      const disk = window.$preload.store.get('copilot.sessions') || []
+      const taskSessions = (Array.isArray(disk) ? disk : []).filter(session => session?.id && session.taskId)
+      const merged = [...taskSessions, ...serialized.filter(session => !session.taskId)]
+
+      window.$preload.store.set('copilot.sessions', merged)
+    }
+    catch (error) {
+      console.error('[Copilot] persist sessions failed:', error)
+    }
   }, { deep: true })
 
   function persistSettings() {
@@ -99,10 +120,19 @@ export function useCopilot() {
       // ignore — the IPC may not be available in older hosts
     }
 
-    window.$preload.store.set('copilot.settings', JSON.parse(JSON.stringify({
-      ...toRaw(settings),
-      vendors: toRaw(settings.vendors),
-    })))
+    try {
+      window.$preload.store.set('copilot.settings', JSON.parse(JSON.stringify({
+        ...toRaw(settings),
+        vendors: toRaw(settings.vendors),
+      })))
+    }
+    catch (error) {
+      // The hardened store retries transient fs errors; if it still fails,
+      // surface it instead of failing silently (the old "config does not
+      // persist" bug was invisible to the user).
+      console.error('[Copilot] persist settings failed:', error)
+      ElMessage?.error?.(error?.message || 'Failed to save Copilot settings')
+    }
   }
 
   // ── sessions ────────────────────────────────────────────────
@@ -418,7 +448,7 @@ export function useCopilot() {
       tasks.push(
         adb.screencap(deviceId, { returnBase64: true })
           .then((base64) => { context.lastScreenshot = `data:image/png;base64,${base64}` })
-          .catch((error) => console.warn('[Copilot] auto screenshot failed:', error?.message ?? error)),
+          .catch(error => console.warn('[Copilot] auto screenshot failed:', error?.message ?? error)),
       )
     }
 
@@ -426,7 +456,7 @@ export function useCopilot() {
       tasks.push(
         Promise.resolve(adb.uiDump(deviceId))
           .then((xml) => { context.lastUiLayout = truncate(xml, 12000) })
-          .catch((error) => console.warn('[Copilot] auto ui-dump failed:', error?.message ?? error)),
+          .catch(error => console.warn('[Copilot] auto ui-dump failed:', error?.message ?? error)),
       )
     }
 
@@ -436,49 +466,67 @@ export function useCopilot() {
 
   // ── message context building ────────────────────────────────
   function buildContextMessages(session) {
-    const messages = []
+    return buildApiMessages(session.messages, {
+      systemPrompt: settings.systemPrompt,
+      vision: Boolean(activeVendor.value?.vision),
+    })
+  }
 
-    if (settings.systemPrompt?.trim())
-      messages.push({ role: 'system', content: settings.systemPrompt.trim() })
+  /** Rough context usage (0..1) for the compact indicator in the composer. */
+  const contextUsage = computed(() => {
+    const session = activeSession.value
+    if (!session)
+      return 0
+    const budget = Number(settings.contextWindow) || 32000
+    return Math.min(1, estimateTokens(session.messages || []) / budget)
+  })
 
-    const history = session.messages.slice(-40)
-    for (const message of history) {
-      if (message.role === 'user') {
-        const parts = []
-        const text = typeof message.content === 'string' ? message.content : ''
-        if (text)
-          parts.push({ type: 'text', text })
+  /**
+   * Auto-compact the session when the estimated context approaches the model
+   * budget. Tries an LLM summary of the older turns first (so the agent keeps
+   * its memory), falls back to aggressive truncation when the summarize call
+   * fails. A systemNote message is left in the conversation so the user can
+   * see that compaction happened.
+   */
+  async function compactIfNeeded(session) {
+    if (settings.autoCompact === false)
+      return false
 
-        // Attach the most recent screenshot before this message for vision models.
-        if (activeVendor.value?.vision) {
-          for (const image of message.images || [])
-            parts.push({ type: 'image_url', image_url: { url: image } })
-        }
+    const budget = Number(settings.contextWindow) || 32000
+    const messages = session.messages || []
 
-        messages.push({ role: 'user', content: parts.length === 1 && parts[0].type === 'text' ? text : parts })
-        continue
+    if (estimateTokens(messages) <= budget * 0.75)
+      return false
+
+    const summarize = async (toSummarize) => {
+      try {
+        const request = await requestChat([
+          { role: 'system', content: 'You are a conversation summarizer. Produce a dense, factual summary of the conversation: what the user asked for, what actions were performed on the device (tools called and their outcomes), current screen state and any pending goals. Keep it under 400 words. Reply in the conversation language.' },
+          { role: 'user', content: JSON.stringify(toSummarize.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content.slice(0, 2000) : '', name: m.name, tool_calls: m.tool_calls }))) },
+        ], [], () => {})
+
+        if (!request?.success || !request.message?.content)
+          return null
+        return String(request.message.content)
       }
-
-      if (message.role === 'assistant') {
-        messages.push({
-          role: 'assistant',
-          content: message.content || null,
-          ...(message.tool_calls?.length ? { tool_calls: message.tool_calls } : {}),
-        })
-        continue
-      }
-
-      if (message.role === 'tool') {
-        messages.push({
-          role: 'tool',
-          tool_call_id: message.tool_call_id,
-          name: message.name,
-          content: String(message.content ?? ''),
-        })
+      catch {
+        return null
       }
     }
 
-    return messages
+    const result = await compactSessionContext(messages, {
+      budgetTokens: budget,
+      summarize,
+      noteText: t('copilot.compact.note'),
+    })
+
+    if (result.compacted) {
+      session.messages = result.messages
+      touchSession(session)
+      console.log(`[Copilot] context auto-compacted (strategy: ${result.strategy})`)
+    }
+
+    return result.compacted
   }
 
   // ── send / agent loop ───────────────────────────────────────
@@ -505,6 +553,10 @@ export function useCopilot() {
     })
     touchSession(session)
 
+    // Compact before starting the (possibly long) agent loop so the whole
+    // turn fits in the context window.
+    await compactIfNeeded(session)
+
     isStreaming.value = true
     streamingText.value = ''
     streamingSteps.value = 0
@@ -518,7 +570,8 @@ export function useCopilot() {
     try {
       let continueLoop = true
 
-      while (continueLoop && (maxSteps === 0 || streamingSteps.value < maxSteps)) {
+      // the step limit is enforced at the end of each iteration below
+      while (continueLoop) {
         // Honors user-initiated abort between iterations, not only mid-request.
         if (currentRequestAborted) {
           if (streamingText.value) {
@@ -697,6 +750,7 @@ export function useCopilot() {
     stepLimitReached,
     lastError,
     pendingConfirm,
+    contextUsage,
 
     createSession,
     ensureSession,

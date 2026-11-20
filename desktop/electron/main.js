@@ -1,3 +1,8 @@
+// Exception guard must be installed before anything else can throw —
+// transient fs errors (EIO on network mounts) used to crash the app with a
+// modal dialog before this line existed.
+import './process/guard.js'
+
 // Process configuration must be imported first
 import './process/index.js'
 

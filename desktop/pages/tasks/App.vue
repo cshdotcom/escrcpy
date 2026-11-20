@@ -107,6 +107,7 @@
         :vendors="vendors"
         :devices="deviceOptions"
         :default-device-id="currentDeviceId"
+        :default-vendor-id="activeVendorId"
         @saved="handleTaskSaved"
         @goto-workflows="activeTab = 'workflows'"
       />
@@ -141,6 +142,7 @@ const {
   workflows,
   runs,
   vendors,
+  activeVendorId,
   loading,
 } = tasksApi
 

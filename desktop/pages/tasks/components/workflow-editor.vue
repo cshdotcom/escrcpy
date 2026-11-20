@@ -130,14 +130,18 @@
     </el-scrollbar>
 
     <template #footer>
-      <el-button @click="visibleModel = false">{{ $t('common.cancel') }}</el-button>
-      <el-button type="primary" :loading="saving" @click="handleSave">{{ $t('common.save') }}</el-button>
+      <el-button @click="visibleModel = false">
+        {{ $t('common.cancel') }}
+      </el-button>
+      <el-button type="primary" :loading="saving" @click="handleSave">
+        {{ $t('common.save') }}
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { AUTOMATION_ACTIONS, VARIABLE_HINTS, WORKFLOW_STEP_TYPES, createDefaultStep } from '../configs/index.js'
+import { AUTOMATION_ACTIONS, createDefaultStep, VARIABLE_HINTS, WORKFLOW_STEP_TYPES } from '../configs/index.js'
 import ActionFields from './action-fields.vue'
 
 const props = defineProps({
@@ -236,7 +240,10 @@ async function handleSave() {
       return ElMessage.warning(t('tasks.validation.stepPrompt', { name: step.name || t('tasks.workflow.step.ai') }))
   }
 
-  const payload = {
+  // Deep-clone through JSON before the IPC hop — see the note in task-editor:
+  // nested Vue reactive proxies cannot cross ipcRenderer.invoke (structured
+  // clone), which used to break saving workflows from this dialog.
+  const payload = JSON.parse(JSON.stringify({
     ...form.value,
     name: String(form.value.name).trim(),
     steps: form.value.steps.map((step) => {
@@ -249,7 +256,7 @@ async function handleSave() {
 
       return snapshot
     }),
-  }
+  }))
 
   saving.value = true
 

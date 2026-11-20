@@ -1,20 +1,21 @@
 import { ipcxMain } from '@escrcpy/electron-ipcx/main'
 import { app } from 'electron'
+import electronStore from '$electron/helpers/store/index.js'
 
 import {
   AUTOMATION_ACTIONS,
-  TASK_TYPES,
   clearRuns,
   deleteTask,
   deleteWorkflow,
   findTask,
   findWorkflow,
+  getCopilotVendors,
   getRuns,
   getTasks,
   getWorkflows,
-  getCopilotVendors,
   patchTask,
   queryRuns,
+  TASK_TYPES,
   uid,
   upsertTask,
   upsertWorkflow,
@@ -220,7 +221,11 @@ export default {
           configured: Boolean(vendor.baseUrl && vendor.model && vendor.apiKey),
         }))
 
-        return ok({ vendors: list })
+        // The task editor uses this to pre-select a working vendor so the
+        // picker never opens on "not configured".
+        const activeVendorId = electronStore.get('copilot.settings.activeVendorId') || ''
+
+        return ok({ vendors: list, activeVendorId })
       }
       catch (error) {
         return fail(error, 'TASKS_VENDORS')
@@ -247,8 +252,10 @@ export default {
       }
     })
 
-    /** Register/unregister Escrcpy as a system login item so scheduled tasks
-     * fire even when the user has not opened the app after boot. */
+    /**
+     * Register/unregister Escrcpy as a system login item so scheduled tasks
+     * fire even when the user has not opened the app after boot.
+     */
     ipcxMain.handle('tasks:set-launch-on-boot', async (_event, payload) => {
       try {
         const enabled = Boolean(payload?.enabled)
@@ -266,8 +273,10 @@ export default {
       }
     })
 
-    /** Read back the current system login-item registration so the config
-     * drawer can show the real state, not just the stored preference. */
+    /**
+     * Read back the current system login-item registration so the config
+     * drawer can show the real state, not just the stored preference.
+     */
     ipcxMain.handle('tasks:get-launch-on-boot', async () => {
       try {
         const settings = app.getLoginItemSettings()

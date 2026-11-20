@@ -69,7 +69,9 @@
 
         <!-- Type-specific config -->
         <template v-if="form.type === 'AI'">
-          <el-divider content-position="left">{{ $t('tasks.editor.aiConfig') }}</el-divider>
+          <el-divider content-position="left">
+            {{ $t('tasks.editor.aiConfig') }}
+          </el-divider>
 
           <el-form-item :label="$t('tasks.fields.vendor')" required>
             <el-select v-model="form.config.vendorId" class="!w-full" :placeholder="$t('tasks.fields.vendorPlaceholder')">
@@ -78,7 +80,6 @@
                 :key="vendor.id"
                 :value="vendor.id"
                 :label="`${vendor.name} · ${vendor.model || '...'}`"
-                :disabled="!vendor.configured"
               >
                 <div class="flex items-center justify-between gap-3 w-full">
                   <span>{{ vendor.name }} · {{ vendor.model || '...' }}</span>
@@ -90,6 +91,37 @@
             </el-select>
             <div v-if="!vendors.length" class="w-full mt-1 text-xs text-gray-400">
               {{ $t('tasks.vendor.emptyHint') }}
+            </div>
+            <div v-else-if="selectedVendor && !selectedVendor.configured" class="w-full mt-1 text-xs text-orange-500">
+              {{ $t('tasks.vendor.needConfigHint') }}
+            </div>
+          </el-form-item>
+
+          <!-- Session mode: fresh context each run, or one persistent conversation -->
+          <el-form-item :label="$t('tasks.fields.sessionMode')">
+            <div class="flex flex-col gap-2 w-full">
+              <el-radio-group v-model="form.config.sessionMode">
+                <el-radio value="new">
+                  {{ $t('tasks.fields.sessionModeNew') }}
+                </el-radio>
+                <el-radio value="continue">
+                  {{ $t('tasks.fields.sessionModeContinue') }}
+                </el-radio>
+              </el-radio-group>
+              <span class="text-xs text-gray-400">{{ $t('tasks.fields.sessionModeHint') }}</span>
+            </div>
+          </el-form-item>
+
+          <!-- Agent mode: let the AI operate the device with tools -->
+          <el-form-item :label="$t('tasks.fields.agentMode')">
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2">
+                <el-switch v-model="form.config.agentMode" />
+                <span class="text-xs text-gray-400">{{ $t('tasks.fields.agentModeHint') }}</span>
+              </div>
+              <span v-if="form.config.agentMode" class="text-xs text-orange-500">
+                {{ $t('tasks.fields.agentModeWarning') }}
+              </span>
             </div>
           </el-form-item>
 
@@ -132,7 +164,9 @@
         </template>
 
         <template v-else-if="form.type === 'AUTOMATION'">
-          <el-divider content-position="left">{{ $t('tasks.editor.automationConfig') }}</el-divider>
+          <el-divider content-position="left">
+            {{ $t('tasks.editor.automationConfig') }}
+          </el-divider>
 
           <el-form-item :label="$t('tasks.fields.action')" required>
             <el-select v-model="form.config.action" class="!w-full" @change="handleActionChange">
@@ -149,7 +183,9 @@
         </template>
 
         <template v-else>
-          <el-divider content-position="left">{{ $t('tasks.editor.workflowConfig') }}</el-divider>
+          <el-divider content-position="left">
+            {{ $t('tasks.editor.workflowConfig') }}
+          </el-divider>
 
           <el-form-item :label="$t('tasks.fields.workflow')" required>
             <div class="flex gap-2 w-full">
@@ -175,7 +211,9 @@
         </template>
 
         <!-- Notification -->
-        <el-divider content-position="left">{{ $t('tasks.editor.options') }}</el-divider>
+        <el-divider content-position="left">
+          {{ $t('tasks.editor.options') }}
+        </el-divider>
 
         <el-form-item>
           <el-switch v-model="form.notifyOnComplete" :label="$t('tasks.fields.notifyOnComplete')" />
@@ -185,14 +223,18 @@
     </el-scrollbar>
 
     <template #footer>
-      <el-button @click="visibleModel = false">{{ $t('common.cancel') }}</el-button>
-      <el-button type="primary" :loading="saving" @click="handleSave">{{ $t('common.save') }}</el-button>
+      <el-button @click="visibleModel = false">
+        {{ $t('common.cancel') }}
+      </el-button>
+      <el-button type="primary" :loading="saving" @click="handleSave">
+        {{ $t('common.save') }}
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { AUTOMATION_ACTIONS, CRON_PRESETS, TASK_TYPES, createDefaultConfig } from '../configs/index.js'
+import { AUTOMATION_ACTIONS, createDefaultConfig, CRON_PRESETS, TASK_TYPES } from '../configs/index.js'
 import ActionFields from './action-fields.vue'
 import { formatDateTime } from '../hooks/use-tasks.js'
 
@@ -203,6 +245,7 @@ const props = defineProps({
   vendors: { type: Array, default: () => [] },
   devices: { type: Array, default: () => [] },
   defaultDeviceId: { type: String, default: '' },
+  defaultVendorId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:visible', 'saved', 'goto-workflows'])
@@ -235,6 +278,10 @@ const selectedWorkflow = computed(() => {
   return props.workflows.find(workflow => workflow.id === form.value.config.workflowId) || null
 })
 
+const selectedVendor = computed(() => {
+  return props.vendors.find(vendor => vendor.id === form.value.config.vendorId) || null
+})
+
 watch(() => props.visible, (value) => {
   if (!value)
     return
@@ -244,7 +291,10 @@ watch(() => props.visible, (value) => {
   if (task) {
     form.value = {
       ...task,
-      config: JSON.parse(JSON.stringify(task.config || {})),
+      config: {
+        ...createDefaultConfig('AI'),
+        ...JSON.parse(JSON.stringify(task.config || {})),
+      },
     }
   }
   else {
@@ -260,6 +310,15 @@ watch(() => props.visible, (value) => {
 
     if (props.defaultDeviceId)
       form.value.config.deviceId = props.defaultDeviceId
+
+    // Default the vendor to the active Copilot vendor so the picker is never
+    // stuck on "not configured" when a working vendor exists.
+    const preferred = props.vendors.find(vendor => vendor.id === props.defaultVendorId && vendor.configured)
+      || props.vendors.find(vendor => vendor.configured)
+      || props.vendors.find(vendor => vendor.id === props.defaultVendorId)
+      || props.vendors[0]
+    if (preferred)
+      form.value.config.vendorId = preferred.id
   }
 
   const preset = CRON_PRESETS.find(item => item.value === form.value.cronExpr)
@@ -337,19 +396,38 @@ async function handleSave() {
   if (form.value.type === 'AI' && !String(config.prompt || '').trim())
     return ElMessage.warning(t('tasks.validation.prompt'))
 
+  if (form.value.type === 'AI' && !config.vendorId)
+    return ElMessage.warning(t('tasks.validation.vendor'))
+
+  if (form.value.type === 'AI' && form.value.config.agentMode === true && !config.deviceId)
+    return ElMessage.warning(t('tasks.validation.agentDevice'))
+
   if (form.value.type === 'WORKFLOW' && !config.workflowId)
     return ElMessage.warning(t('tasks.validation.workflow'))
 
   if (form.value.type === 'AUTOMATION' && config.action === 'http' && !/^https?:\/\//i.test(String(config.url || '')))
     return ElMessage.warning(t('tasks.validation.url'))
 
-  const payload = {
+  // Deep-clone through JSON before the IPC hop: `form.value` is a Vue reactive
+  // proxy and nested objects (config) stay proxied after a spread — V8's
+  // structured clone used by ipcRenderer.invoke cannot clone proxies and
+  // throws "An object could not be cloned", which broke saving tasks from
+  // this dialog entirely.
+  const payload = JSON.parse(JSON.stringify({
     ...form.value,
     name: String(form.value.name).trim(),
-  }
+  }))
 
-  if (form.value.type === 'AI')
+  if (form.value.type === 'AI') {
     payload.config.vendorSnapshot = buildVendorSnapshot()
+
+    // Warn (but allow saving) when the selected vendor is not fully configured:
+    // the task will keep failing at runtime until the API key / model are set
+    // up in the Copilot config.
+    const vendor = props.vendors.find(item => item.id === config.vendorId)
+    if (vendor && !vendor.configured)
+      ElMessage.warning(t('tasks.vendor.needConfigHint'))
+  }
 
   saving.value = true
 

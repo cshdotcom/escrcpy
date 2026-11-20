@@ -79,6 +79,13 @@ export function createDefaultConfig(type = 'AI') {
       includeDeviceInfo: false,
       includeScreenshot: false,
       vendorSnapshot: null,
+      // 'new'    — every run starts a fresh context
+      // 'continue' — every run continues the task's own persistent conversation
+      sessionMode: 'new',
+      // When true the task runs as a full device agent: the model gets the
+      // Copilot tool set (tap/swipe/key/shell/screenshot/…) and operates the
+      // device autonomously, with unlimited steps by default.
+      agentMode: false,
     }
   }
 
@@ -182,9 +189,11 @@ export function describeTaskConfig(task, t) {
     case 'swipe': return `swipe (${config.x1}, ${config.y1}) → (${config.x2}, ${config.y2})`
     case 'key': {
       const hit = KEY_OPTIONS.find(option => option.value === Number(config.keyCode))
-      return hit ? t(`automation.keys.${{
-        3: 'home', 4: 'back', 82: 'menu', 26: 'power', 187: 'recentApps', 24: 'volumeUp', 25: 'volumeDown', 67: 'delete', 66: 'enter',
-      }[hit.value]}`) : `keyevent ${config.keyCode}`
+      return hit
+        ? t(`automation.keys.${{
+            3: 'home', 4: 'back', 82: 'menu', 26: 'power', 187: 'recentApps', 24: 'volumeUp', 25: 'volumeDown', 67: 'delete', 66: 'enter',
+          }[hit.value]}`)
+        : `keyevent ${config.keyCode}`
     }
     case 'input_text': return String(config.text || '').slice(0, 40)
     case 'open_app': return String(config.package || '')

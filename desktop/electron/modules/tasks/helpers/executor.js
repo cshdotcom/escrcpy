@@ -2,7 +2,11 @@
  * Task and workflow execution engine (main process).
  *
  * Task types:
- *  - AI: scheduled prompts executed through the Copilot provider stack
+ *  - AI: scheduled prompts executed through the Copilot provider stack.
+ *        Optional agent mode gives the model the full Copilot tool set so it
+ *        can operate the device autonomously (tap/swipe/shell/…, unlimited
+ *        steps by default). Optional session mode "continue" reuses one
+ *        persistent conversation across runs so the AI keeps its memory.
  *  - AUTOMATION: device operations, HTTP requests and desktop notifications
  *  - WORKFLOW: multi-step chains mixing AI steps, actions and delays
  */
@@ -12,30 +16,23 @@ import { app, Notification } from 'electron'
 import dayjs from 'dayjs'
 import { Adb } from '@devicefarmer/adbkit'
 import { createAdbx } from '@escrcpy/adbx'
+import {
+  AI_KEY_EVENTS,
+  buildAiToolSchemas,
+  buildApiMessages,
+  compactSessionContext,
+  estimateTokens,
+  isDangerousShell,
+} from '@escrcpy/shared'
 import { yadbPath } from '$electron/configs/index.js'
 import { setupEnvPath } from '$electron/process/helper.js'
 import electronStore from '$electron/helpers/store/index.js'
 import { chatWithProvider } from '../../copilot/helpers/providers.js'
 
-import { addRun, findTask, findWorkflow, patchTask, updateRun, uid } from './store.js'
+import { addRun, findTask, findWorkflow, patchTask, uid, updateRun } from './store.js'
 import { computeNextRunAt } from './schedule-helper.js'
 
-// Mirrors the Copilot shell guard (desktop/pages/copilot/configs/index.js).
-const DANGEROUS_SHELL_PATTERNS = [
-  /\breboot\b/i,
-  /\bshutdown\b/i,
-  /\bformat\b/i,
-  /(^|\s)su(\s|$)/,
-  /\brm\s+-rf?\s+\//i,
-  /factory\s*reset/i,
-  /\bflash_image\b/i,
-  /\bwipe\s+data\b/i,
-  /\bmkfs\b/i,
-]
-
-export function isDangerousShell(command) {
-  return DANGEROUS_SHELL_PATTERNS.some(pattern => pattern.test(String(command || '').trim()))
-}
+export { isDangerousShell }
 
 // ── ADB (main-process instance) ──────────────────────────
 let adbxInstance = null
@@ -218,6 +215,7 @@ export function resolveVendorConfig(config = {}) {
       temperature: live.temperature,
       maxOutputTokens: live.maxOutputTokens,
       streaming: false,
+      vision: live.vision === true,
     }
   }
 
@@ -227,6 +225,55 @@ export function resolveVendorConfig(config = {}) {
   }
 
   return null
+}
+
+/** Shared Copilot settings (auto context capture, steps, retries, compaction). */
+function getCopilotSettings() {
+  return electronStore.get('copilot.settings') || {}
+}
+
+// ── persistent task conversations (sessionMode: 'continue') ──
+const SESSIONS_KEY = 'copilot.sessions'
+
+function getSessions() {
+  const value = electronStore.get(SESSIONS_KEY)
+  return Array.isArray(value) ? value : []
+}
+
+/**
+ * Find (or create) the persistent conversation owned by a task. Task sessions
+ * carry `taskId`, are scoped to the task's device so they show up in the
+ * Copilot window opened for that device, and survive across runs.
+ */
+function findOrCreateTaskSession(task, config) {
+  const sessions = getSessions()
+  let session = sessions.find(item => item?.taskId === task.id)
+
+  if (!session) {
+    session = {
+      id: uid('session'),
+      taskId: task.id,
+      // scope the session to the device so a Copilot window opened for that
+      // device displays the task conversation; device-less tasks get a
+      // private scope only they can see.
+      scope: config.deviceId || `task:${task.id}`,
+      name: task.name || 'Scheduled task',
+      deviceId: config.deviceId || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+    }
+    sessions.unshift(session)
+  }
+
+  return { sessions, session }
+}
+
+function saveSessions(sessions, session) {
+  session.updatedAt = new Date().toISOString()
+
+  const list = sessions.map(item => (item.id === session.id ? session : item))
+  electronStore.set(SESSIONS_KEY, list)
 }
 
 async function collectAiText(config, messages) {
@@ -250,9 +297,11 @@ async function collectAiText(config, messages) {
   return text
 }
 
-/** Retry wrapper for AI calls. Transient failures (network, rate-limit, server
+/**
+ * Retry wrapper for AI calls. Transient failures (network, rate-limit, server
  * errors) are retried with exponential backoff so scheduled tasks run to
- * completion instead of stopping at the first hiccup. */
+ * completion instead of stopping at the first hiccup.
+ */
 async function callAiWithRetry(config, messages, options = {}) {
   const maxRetries = Number(options.maxRetries) || 0
   const retryable = options.retryable !== false
@@ -331,7 +380,283 @@ async function buildDeviceContext(config) {
   return { note: parts.join('\n'), image }
 }
 
-export async function runAiPrompt(config = {}) {
+// ── agent tool execution (mirrors the Copilot renderer loop) ──
+/**
+ * Execute one agent tool call against the device. Mirrors the renderer's
+ * use-copilot executeTool, including the auto screenshot + UI dump capture
+ * after mutating actions so the model can verify the result.
+ */
+async function executeAgentTool(name, args, context, settings) {
+  const adbx = getAdbx()
+  const deviceId = context.deviceId
+
+  if (!deviceId && name !== 'list_devices')
+    throw new Error('No device selected for this task')
+
+  const capturePostActionContext = async () => {
+    const tasks = []
+
+    if (settings.autoScreenshotAfterAction !== false) {
+      tasks.push(
+        adbx.screenshot.captureBase64(deviceId)
+          .then(base64 => (context.lastScreenshot = `data:image/png;base64,${base64}`))
+          .catch(error => console.warn('[Tasks] auto screenshot failed:', error?.message ?? error)),
+      )
+    }
+
+    if (settings.autoUiDumpAfterAction !== false) {
+      tasks.push(
+        Promise.resolve(adbx.ui.dumpLayout(deviceId))
+          .then(xml => (context.lastUiLayout = truncate(xml, 12000)))
+          .catch(error => console.warn('[Tasks] auto ui-dump failed:', error?.message ?? error)),
+      )
+    }
+
+    if (tasks.length)
+      await Promise.all(tasks)
+  }
+
+  switch (name) {
+    case 'list_devices': {
+      const devices = await adbx.getDevices()
+      return JSON.stringify(devices.map(device => ({ id: device.id, status: device.type })))
+    }
+
+    case 'get_device_info': {
+      const [screen, battery, model, brand, version, focus] = await Promise.all([
+        adbx.deviceInfo.getScreenSize(deviceId).catch(() => null),
+        adbx.deviceInfo.getBatteryLevel(deviceId).catch(() => null),
+        adbx.deviceInfo.getProperty(deviceId, 'ro.product.model').catch(() => null),
+        adbx.deviceInfo.getProperty(deviceId, 'ro.product.brand').catch(() => null),
+        adbx.deviceInfo.getProperty(deviceId, 'ro.build.version.release').catch(() => null),
+        adbx.shell(deviceId, 'dumpsys window | grep mCurrentFocus').catch(() => null),
+      ])
+      return JSON.stringify({
+        model,
+        brand,
+        androidVersion: version,
+        screenSize: screen,
+        batteryLevel: battery,
+        currentFocus: String(focus || '').trim(),
+      })
+    }
+
+    case 'screenshot': {
+      const base64 = await adbx.screenshot.captureBase64(deviceId)
+      context.lastScreenshot = `data:image/png;base64,${base64}`
+      const { width, height } = await adbx.deviceInfo.getScreenSize(deviceId).catch(() => ({ width: 0, height: 0 }))
+      return JSON.stringify({
+        captured: true,
+        width,
+        height,
+        attachedToConversation: Boolean(context.vision),
+      })
+    }
+
+    case 'get_ui_layout': {
+      const xml = await adbx.ui.dumpLayout(deviceId)
+      context.lastUiLayout = truncate(xml, 12000)
+      return context.lastUiLayout
+    }
+
+    case 'tap': {
+      await adbx.input.tap(deviceId, Math.round(args.x), Math.round(args.y))
+      await capturePostActionContext()
+      return JSON.stringify({ success: true, action: 'tap', x: args.x, y: args.y })
+    }
+
+    case 'swipe': {
+      await adbx.input.swipe(deviceId, Math.round(args.x1), Math.round(args.y1), Math.round(args.x2), Math.round(args.y2), args.duration || 300)
+      await capturePostActionContext()
+      return JSON.stringify({ success: true, action: 'swipe', from: [args.x1, args.y1], to: [args.x2, args.y2] })
+    }
+
+    case 'input_text': {
+      await adbx.input.text(deviceId, String(args.text ?? ''))
+      await capturePostActionContext()
+      return JSON.stringify({ success: true, action: 'input_text', text: args.text })
+    }
+
+    case 'key': {
+      const keyCode = AI_KEY_EVENTS[String(args.key).toLowerCase()]
+      if (!keyCode)
+        throw new Error(`Unknown key: ${args.key}`)
+      await adbx.input.key(deviceId, keyCode)
+      await capturePostActionContext()
+      return JSON.stringify({ success: true, action: 'key', key: args.key })
+    }
+
+    case 'open_app': {
+      await adbx.shell(deviceId, `monkey -p ${String(args.package).trim()} -c android.intent.category.LAUNCHER 1`)
+      await new Promise(resolve => setTimeout(resolve, 800))
+      await capturePostActionContext()
+      return JSON.stringify({ success: true, action: 'open_app', package: args.package })
+    }
+
+    case 'shell': {
+      const command = String(args.command || '').trim()
+      if (isDangerousShell(command))
+        throw new Error('Blocked: this command is considered dangerous')
+      const output = await adbx.shell(deviceId, command, { stderr: false })
+      if (/\b(input|am|pm|svc|settings|cmd)\b/i.test(command))
+        await capturePostActionContext()
+      return truncate(output, 6000)
+    }
+
+    default:
+      throw new Error(`Unknown tool: ${name}`)
+  }
+}
+
+/** One LLM round inside the agent loop: returns the assembled assistant message. */
+async function agentRound(vendorConfig, messages, tools) {
+  let text = ''
+  const toolCalls = []
+
+  await chatWithProvider({
+    config: vendorConfig,
+    messages,
+    tools,
+    onEvent: (event) => {
+      if (event.type === 'text-delta')
+        text += event.text
+      if (event.type === 'tool-call') {
+        toolCalls.push({
+          id: event.toolCall.id,
+          type: 'function',
+          function: {
+            name: event.toolCall.name,
+            arguments: JSON.stringify(event.toolCall.arguments ?? {}),
+          },
+        })
+      }
+    },
+  })
+
+  return {
+    role: 'assistant',
+    content: text || null,
+    ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+  }
+}
+
+/**
+ * Full autonomous agent run for a scheduled AI task: the model gets the same
+ * tool set as the interactive Copilot and operates the device until it stops
+ * calling tools (or the configured step limit hits — 0 means unlimited).
+ */
+async function runAiAgentLoop({ vendorConfig, settings, session, config, promptText }) {
+  const adbxSettings = settings
+  const tools = buildAiToolSchemas({ allowShell: adbxSettings.allowShell !== false })
+
+  const context = {
+    deviceId: config.deviceId,
+    vision: vendorConfig.vision === true,
+    lastScreenshot: null,
+    lastUiLayout: null,
+  }
+
+  // maxSteps comes from the shared Copilot setting: 0 = unlimited.
+  const rawMaxSteps = Number(settings.maxSteps)
+  const maxSteps = Number.isFinite(rawMaxSteps) && rawMaxSteps > 0 ? rawMaxSteps : 0
+
+  session.messages.push({
+    id: uid('msg'),
+    role: 'user',
+    content: promptText,
+    createdAt: new Date().toISOString(),
+  })
+
+  const assistantTexts = []
+  let steps = 0
+
+  // maxSteps 0 means unlimited — run until the model stops calling tools.
+  for (;;) {
+    if (maxSteps > 0 && steps >= maxSteps)
+      break
+
+    // Auto-compact when the conversation approaches the context budget.
+    if (settings.autoCompact !== false) {
+      const budget = Number(settings.contextWindow) || 32000
+      if (estimateTokens(session.messages) > budget * 0.75) {
+        const result = await compactSessionContext(session.messages, {
+          budgetTokens: budget,
+          noteText: '[context auto-compacted]',
+        })
+        if (result.compacted)
+          session.messages = result.messages
+      }
+    }
+
+    const messages = buildApiMessages(session.messages, {
+      systemPrompt: config.systemPrompt || undefined,
+      vision: context.vision,
+    })
+
+    steps++
+    const assistantMessage = await agentRound(vendorConfig, messages, tools)
+    session.messages.push({
+      id: uid('msg'),
+      role: 'assistant',
+      ...assistantMessage,
+      createdAt: new Date().toISOString(),
+    })
+
+    if (assistantMessage.content)
+      assistantTexts.push(String(assistantMessage.content))
+
+    const toolCalls = assistantMessage.tool_calls || []
+    if (!toolCalls.length)
+      break
+
+    for (const call of toolCalls) {
+      const toolName = call.function?.name || 'unknown'
+      let args = {}
+      try {
+        args = JSON.parse(call.function?.arguments || '{}')
+      }
+      catch {}
+
+      const toolMessage = {
+        id: uid('msg'),
+        role: 'tool',
+        tool_call_id: call.id,
+        name: toolName,
+        args,
+        content: '',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      }
+      session.messages.push(toolMessage)
+
+      try {
+        toolMessage.content = await executeAgentTool(toolName, args, context, adbxSettings)
+        toolMessage.status = 'completed'
+
+        // Vision bridge: attach the latest screenshot to the tool message; the
+        // shared buildApiMessages re-sends it as a user image message.
+        if (context.lastScreenshot && context.vision)
+          toolMessage.image = context.lastScreenshot
+
+        if (context.lastUiLayout && !context.vision) {
+          const note = `\n[auto ui-dump]\n${context.lastUiLayout.slice(0, 4000)}`
+          if (!String(toolMessage.content).includes('[auto ui-dump]'))
+            toolMessage.content = `${String(toolMessage.content)}${note}`
+        }
+      }
+      catch (error) {
+        toolMessage.content = JSON.stringify({ error: error?.message ?? 'Tool execution failed' })
+        toolMessage.status = 'failed'
+      }
+    }
+  }
+
+  const output = assistantTexts.join('\n\n') || `(agent finished after ${steps} step(s) without a textual reply)`
+
+  return { output, steps }
+}
+
+export async function runAiPrompt(config = {}, task = null) {
   const vendorConfig = resolveVendorConfig(config)
 
   if (!vendorConfig)
@@ -341,41 +666,103 @@ export async function runAiPrompt(config = {}) {
   if (!prompt)
     throw new Error('AI prompt is empty')
 
-  const context = await buildDeviceContext(config)
+  const settings = getCopilotSettings()
 
-  const promptText = context.note ? `${prompt}\n\n${context.note}` : prompt
-  const userParts = [{ type: 'text', text: promptText }]
+  // ── agent mode: full autonomous device control ──────────────
+  if (config.agentMode === true) {
+    if (!config.deviceId)
+      throw new Error('Agent tasks need a target device')
 
-  if (context.image) {
-    if (config.vendorSnapshot?.vision) {
-      userParts.push({ type: 'image_url', image_url: { url: context.image } })
+    const useSession = config.sessionMode === 'continue' && task?.id
+    const { sessions, session } = useSession
+      ? findOrCreateTaskSession(task, config)
+      : { sessions: null, session: { messages: [] } }
+
+    const context = await buildDeviceContext({ ...config, includeDeviceInfo: true })
+    const promptText = context.note ? `${prompt}\n\n${context.note}` : prompt
+
+    try {
+      const result = await runAiAgentLoop({ vendorConfig, settings, session, config, promptText })
+      return { ...result, sessionId: useSession ? session.id : null }
     }
-    else {
-      userParts.push({ type: 'text', text: '(A screenshot was captured but the selected vendor is not marked as vision-capable, so it is not attached.)' })
+    finally {
+      if (useSession)
+        saveSessions(sessions, session)
     }
   }
 
-  const messages = []
+  // ── plain text mode ─────────────────────────────────────────
+  const useSession = config.sessionMode === 'continue' && task?.id
+  const { sessions, session } = useSession
+    ? findOrCreateTaskSession(task, config)
+    : { sessions: null, session: { messages: [] } }
 
-  if (config.systemPrompt?.trim())
-    messages.push({ role: 'system', content: config.systemPrompt.trim() })
+  try {
+    const context = await buildDeviceContext(config)
 
-  messages.push({
-    role: 'user',
-    content: userParts.length === 1 ? promptText : userParts,
-  })
+    const promptText = context.note ? `${prompt}\n\n${context.note}` : prompt
+    const userParts = [{ type: 'text', text: promptText }]
 
-  // Retry up to N times on transient failures so a scheduled AI task keeps
-  // running toward completion. The maxRetries is read from the persisted
-  // copilot settings (set via the Copilot config drawer) and defaults to 3.
-  const maxRetries = Number(electronStore.get('copilot.settings.maxRetries')) || 3
-  const retryOnFailure = electronStore.get('copilot.settings.retryOnFailure') !== false
+    if (context.image) {
+      if (vendorConfig.vision || config.vendorSnapshot?.vision) {
+        userParts.push({ type: 'image_url', image_url: { url: context.image } })
+      }
+      else {
+        userParts.push({ type: 'text', text: '(A screenshot was captured but the selected vendor is not marked as vision-capable, so it is not attached.)' })
+      }
+    }
 
-  const text = await callAiWithRetry(vendorConfig, messages, {
-    maxRetries: retryOnFailure ? maxRetries : 0,
-    retryable: retryOnFailure,
-  })
-  return { output: text }
+    const userMessage = {
+      id: uid('msg'),
+      role: 'user',
+      content: userParts.length === 1 ? promptText : userParts,
+      createdAt: new Date().toISOString(),
+    }
+
+    session.messages.push(userMessage)
+
+    // Auto-compact a long-running persistent conversation.
+    if (useSession && settings.autoCompact !== false) {
+      const budget = Number(settings.contextWindow) || 32000
+      if (estimateTokens(session.messages) > budget * 0.75) {
+        const result = await compactSessionContext(session.messages, {
+          budgetTokens: budget,
+          noteText: '[context auto-compacted]',
+        })
+        if (result.compacted)
+          session.messages = result.messages
+      }
+    }
+
+    const messages = buildApiMessages(session.messages, {
+      systemPrompt: config.systemPrompt || undefined,
+      vision: Boolean(vendorConfig.vision || config.vendorSnapshot?.vision),
+    })
+
+    // Retry up to N times on transient failures so a scheduled AI task keeps
+    // running toward completion. The maxRetries is read from the persisted
+    // copilot settings (set via the Copilot config drawer) and defaults to 3.
+    const maxRetries = Number(settings.maxRetries) || 3
+    const retryOnFailure = settings.retryOnFailure !== false
+
+    const text = await callAiWithRetry(vendorConfig, messages, {
+      maxRetries: retryOnFailure ? maxRetries : 0,
+      retryable: retryOnFailure,
+    })
+
+    session.messages.push({
+      id: uid('msg'),
+      role: 'assistant',
+      content: text,
+      createdAt: new Date().toISOString(),
+    })
+
+    return { output: text, sessionId: useSession ? session.id : null }
+  }
+  finally {
+    if (useSession)
+      saveSessions(sessions, session)
+  }
 }
 
 // ── Workflows ────────────────────────────────────────────
@@ -569,8 +956,10 @@ export async function executeTask(task, trigger = 'schedule') {
 
   try {
     if (task.type === 'AI') {
-      const result = await runAiPrompt(task.config || {})
+      const result = await runAiPrompt(task.config || {}, task)
       output = result.output
+      if (result.steps)
+        output = `${output}\n\n[agent steps: ${result.steps}]`
     }
     else if (task.type === 'AUTOMATION') {
       const result = await runAction(task.config || {})

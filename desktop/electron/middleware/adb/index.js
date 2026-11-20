@@ -134,26 +134,84 @@ async function version() {
 }
 
 async function watch(callback) {
-  const tracker = await client.trackDevices()
-  tracker.on('add', async (ret) => {
-    callback('add', ret)
-  })
+  // Robust device tracker:
+  //  - forwards 'change' events too (state flips like device⇄offline arrive
+  //    as 'change', NOT as add/remove — dropping them left the UI showing
+  //    a stale "offline" device until the user physically replugged it)
+  //  - reconnects automatically when the tracker stream ends or errors
+  //    (adb daemon restart, transient socket failure) instead of going
+  //    permanently deaf
+  let closed = false
+  let tracker = null
+  let reconnectAttempt = 0
+  let reconnectTimer = null
 
-  tracker.on('remove', (device) => {
-    callback('remove', device)
-  })
+  function scheduleReconnect() {
+    if (closed || reconnectTimer)
+      return
 
-  tracker.on('end', (ret) => {
-    callback('end', ret)
-  })
+    reconnectAttempt++
+    const delay = Math.min(1000 * 2 ** Math.min(reconnectAttempt, 4), 15000)
+    console.warn(`[ADB] device tracker lost (attempt #${reconnectAttempt}), reconnecting in ${delay}ms`)
 
-  tracker.on('error', (err) => {
-    callback('error', err)
-  })
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null
+      if (closed)
+        return
 
-  const close = () => tracker.end()
+      try {
+        tracker = await client.trackDevices()
+        reconnectAttempt = 0
+        attach()
+        console.log('[ADB] device tracker reconnected')
+      }
+      catch (error) {
+        console.warn('[ADB] tracker reconnect failed:', error?.message ?? error)
+        scheduleReconnect()
+      }
+    }, delay)
+  }
 
-  return close
+  function attach() {
+    tracker.on('add', ret => callback('add', ret))
+    tracker.on('change', ret => callback('change', ret))
+    tracker.on('remove', (device) => {
+      callback('remove', device)
+    })
+    tracker.on('end', () => {
+      if (closed)
+        return
+      callback('end', {})
+      scheduleReconnect()
+    })
+    tracker.on('error', (err) => {
+      if (closed)
+        return
+      callback('error', err)
+      // ending the tracker triggers the 'end' handler above → reconnect
+      try {
+        tracker?.end?.()
+      }
+      catch {
+        scheduleReconnect()
+      }
+    })
+  }
+
+  tracker = await client.trackDevices()
+  attach()
+
+  return () => {
+    closed = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    try {
+      tracker?.end?.()
+    }
+    catch {}
+  }
 }
 
 async function readdir(id, currentPath) {
@@ -463,6 +521,10 @@ async function getDeviceList() {
   const listDevicesWithPaths = await client.listDevicesWithPaths()
   const devices = listDevicesWithPaths.filter(item => !['offline'].includes(item.type))
 
+  // Offline devices cannot be used, but they CAN usually be recovered without
+  // replugging — kick adb as soon as we notice one (rate-limited).
+  recoverOfflineDevices(listDevicesWithPaths)
+
   const concurrencyLimit = Number(electronStore.get('common.concurrencyLimit') ?? 10)
   const limit = pLimit(concurrencyLimit)
 
@@ -486,6 +548,74 @@ async function getDeviceList() {
   return value
 }
 
+/**
+ * Lightweight device snapshot for polling: no enrichment shell calls, just
+ * id + state. Used by the renderer to detect state flips without hammering
+ * the device with getprop/wm size round-trips every few seconds.
+ */
+async function getRawDeviceList() {
+  const devices = await client.listDevices()
+  return devices.map(device => ({ id: device.id, type: device.type }))
+}
+
+// ── offline self-healing ────────────────────────────────────
+let lastOfflineRecoveryAt = 0
+const OFFLINE_RECOVERY_INTERVAL_MS = 15_000
+
+/**
+ * When adb reports a device as `offline` the connection is usually just
+ * desynchronised (USB hiccup, device slept). `adb reconnect offline` asks the
+ * daemon to re-handshake — historically users had to physically unplug and
+ * replug the device to recover from this state.
+ */
+async function recoverOfflineDevices(devices) {
+  const offline = (devices || []).filter(device => device.type === 'offline')
+
+  if (!offline.length)
+    return false
+
+  if (Date.now() - lastOfflineRecoveryAt < OFFLINE_RECOVERY_INTERVAL_MS)
+    return false
+
+  lastOfflineRecoveryAt = Date.now()
+
+  console.log(`[ADB] ${offline.length} offline device(s) detected (${offline.map(d => d.id).join(', ')}), running "adb reconnect offline"`)
+
+  try {
+    await shell('reconnect offline')
+  }
+  catch (error) {
+    console.warn('[ADB] reconnect offline failed:', error?.message ?? error)
+  }
+
+  return true
+}
+
+/**
+ * Periodic device health check: catches offline flips even when no window is
+ * listening to the tracker (e.g. app minimized to tray with scheduled tasks).
+ */
+function startDeviceHealthCheck() {
+  const timer = setInterval(async () => {
+    try {
+      const devices = await client.listDevices()
+      await recoverOfflineDevices(devices)
+    }
+    catch {
+      // adb daemon hiccup — the tracker reconnect logic handles the socket
+    }
+  }, 10_000)
+
+  // Don't keep the process alive just for this interval (should not matter
+  // inside Electron, but be a good citizen anyway).
+  if (typeof timer.unref === 'function')
+    timer.unref()
+
+  return timer
+}
+
+let deviceHealthTimer = null
+
 function init() {
   // Setup the PATH environment variable by injecting necessary tool paths
   setupEnvPath()
@@ -496,6 +626,9 @@ function init() {
     adb: client,
     yadbPath,
   })
+
+  if (!deviceHealthTimer)
+    deviceHealthTimer = startDeviceHealthCheck()
 }
 
 async function killProcesses() {
@@ -534,6 +667,7 @@ export default {
   init,
   getScreenSize,
   getDeviceList,
+  getRawDeviceList,
   deviceShell,
   kill,
   pair,

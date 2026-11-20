@@ -213,6 +213,28 @@
             </div>
           </el-form-item>
 
+          <el-form-item :label="$t('copilot.config.context')">
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.autoCompact" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.autoCompactHint') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400 shrink-0">{{ $t('copilot.config.contextWindow') }}</span>
+                <el-input-number
+                  v-model="settings.contextWindow"
+                  :min="4000"
+                  :max="1000000"
+                  :step="4000"
+                  size="small"
+                  class="!w-36"
+                  @change="persist"
+                />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.contextWindowHint') }}</span>
+              </div>
+            </div>
+          </el-form-item>
+
           <el-form-item :label="$t('copilot.config.systemPrompt')">
             <el-input
               v-model="settings.systemPrompt"
@@ -457,6 +479,8 @@ function handleReset() {
       retryOnFailure: true,
       allowShell: true,
       streaming: true,
+      autoCompact: true,
+      contextWindow: 32000,
       launchOnBoot: settings.launchOnBoot, // don't silently flip OS login state
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
     })

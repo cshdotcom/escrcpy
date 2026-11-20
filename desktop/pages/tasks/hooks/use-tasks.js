@@ -17,6 +17,7 @@ export function useTasks() {
   const workflows = ref([])
   const runs = ref([])
   const vendors = ref([])
+  const activeVendorId = ref('')
   const devices = ref([])
   const stats = ref(null)
   const loading = ref(false)
@@ -47,8 +48,10 @@ export function useTasks() {
 
   async function refreshVendors() {
     const result = await ipcx.invoke('tasks:vendors')
-    if (result?.success)
+    if (result?.success) {
       vendors.value = result.vendors || []
+      activeVendorId.value = result.activeVendorId || ''
+    }
     return vendors.value
   }
 
@@ -161,6 +164,7 @@ export function useTasks() {
     workflows,
     runs,
     vendors,
+    activeVendorId,
     devices,
     stats,
     loading,
