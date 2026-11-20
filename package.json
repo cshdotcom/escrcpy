@@ -1,7 +1,7 @@
 {
   "name": "@escrcpy/workspace",
   "type": "module",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "private": true,
   "packageManager": "pnpm@12.21.0",
   "description": "Scrcpy Powered by Electron",

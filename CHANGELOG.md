@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.6.1](https://github.com/cshdotcom/escrcpy/compare/v3.6.0...v3.6.1) (2026-11-20)
+
+本版本为 v3.6.0 的全功能回归验证版，无功能性变更，包含一处 UI 细节修复。
+
+### Bug Fixes
+
+* 🐛 **修复任务编辑器"接下来"标签折行**：Cron 下次执行时间预览行在窄窗口下标签文字被挤压换行。现固定标签与图标不换行（`shrink-0`），时间列表自动折行
+
+### Test
+
+* ✅ **48 项端到端回归测试全部通过**（真实 LLM + 协议级模拟设备，不再是脚本化 Mock）：
+  - **真实 LLM 验证**：通过桥接服务将 OpenAI 兼容 API 指向真实 GLM 模型（原生 tool calling），模型自主决策工具调用（`list_devices` → `get_device_info` 链式调用）、真实生成最终回答（正确复述设备 ID / 电量 / 分辨率 / 型号）
+  - **协议级设备模拟**：实现 adb wire protocol 模拟服务器（设备发现 / shell v2 / screencap PNG / uiautomator dump / yadb 二进制 sync push / app_process 输入注入），App 内置 adbkit 客户端全程无感知
+  - 主窗口：设备列表、展开行控制栏、定时任务按钮可见性与图标渲染（v3.6.0 修复项回归）
+  - Copilot：窗口打开、i18n、5 处图标、真实 AI 对话工具循环、工具卡片"执行完成"状态、新建会话、打开应用 + 设备信息查询 + 自动截图
+  - 定时任务：任务编辑器、IPC 创建自动化/AI/工作流任务、手动运行、AI 任务真实 LLM 回答、工作流 3 步链、cron 自动触发（trigger=schedule）、执行记录
+  - 三窗口零控制台报错，全部页面截图经视觉审查无异常
+
 ## [3.6.0](https://github.com/cshdotcom/escrcpy/compare/v3.4.0...v3.6.0) (2026-11-19)
 
 本版本为 v3.4.0 的修复与打磨版，包含完整定时任务系统与 AI Copilot 的全部功能，可直接从 3.4.0 / 3.5.0 升级。
