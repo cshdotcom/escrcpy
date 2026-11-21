@@ -1,0 +1,3 @@
+#!/bin/sh
+# E2E fake scrcpy — keeps the dependency check happy
+exit 0

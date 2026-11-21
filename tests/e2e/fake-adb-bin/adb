@@ -1,0 +1,28 @@
+#!/bin/sh
+# E2E fake `adb` CLI.
+# The app shells out to a real `adb` binary for a few host-level commands
+# (notably `adb reconnect offline` in the offline self-heal path, and
+# `adb -s <serial> shell ip ...` for getDeviceIP). This shim forwards those
+# to the fake adb server's control API so the code path is exercised
+# end-to-end. Every invocation is appended to fake-adb-cli.log.
+CTRL="http://127.0.0.1:5038"
+LOG="$(dirname "$0")/fake-adb-cli.log"
+echo "adb $*" >> "$LOG"
+
+case "$*" in
+  *"reconnect offline"*)
+    curl -s -m 5 -X POST "$CTRL/reconnect-offline" > /dev/null 2>&1
+    exit 0
+    ;;
+  *"shell ip -f inet addr show wlan0"*)
+    echo "8: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP>"
+    echo "    inet 192.168.7.42/24 brd 192.168.7.255 scope global wlan0"
+    exit 0
+    ;;
+  "start-server"|"-start-server"|"version"|"devices"|"kill-server")
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
