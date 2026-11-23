@@ -10,7 +10,7 @@
         {{ $t('common.refresh') }}
       </el-button>
       <el-button size="small" type="primary" :disabled="!selectedDevices.length" @click="openGroupCopilot">
-        <i class="i-solar-chat-square-battery-linear mr-1" />
+        <i class="i-solar-chat-square-line-linear mr-1" />
         {{ $t('groupControl.openGroupCopilot') }}
       </el-button>
     </div>
@@ -33,7 +33,7 @@
             @click="toggleDevice(device.id)"
           >
             <el-checkbox :model-value="isSelected(device.id)" size="small" @change="() => toggleDevice(device.id)" @click.stop />
-            <i class="i-solar-smartphone-2-linear text-lg" :class="device.status === 'device' ? 'text-green-500' : 'text-gray-300'" />
+            <i class="i-solar-smartphone-linear text-lg" :class="device.status === 'device' ? 'text-green-500' : 'text-gray-300'" />
             <div class="flex-1 min-w-0">
               <div class="text-xs font-medium truncate">{{ device.id }}</div>
             </div>
@@ -107,7 +107,7 @@
                   {{ $t('groupControl.screenshotAll') }}
                 </el-button>
                 <el-button size="small" :disabled="!ready" :loading="batchBusy" @click="installApk">
-                  <i class="i-solar-install-box-linear mr-1" />
+                  <i class="i-solar-download-square-linear mr-1" />
                   {{ $t('groupControl.installApk') }}
                 </el-button>
               </div>
