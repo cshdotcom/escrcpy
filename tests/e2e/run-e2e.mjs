@@ -14,10 +14,10 @@
  *
  * Usage:  node tests/e2e/run-e2e.mjs          (expects desktop/dist-electron to exist)
  */
-import { spawn, execSync } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { CdpSession, listTargets, waitForVersion } from './cdp.cjs'
 
@@ -63,9 +63,11 @@ async function ctrl(base, method, api, body) {
   return res.json()
 }
 
-/** Type + send one message in a Copilot window like a user would. Tries the
+/**
+ * Type + send one message in a Copilot window like a user would. Tries the
  * send button under several titles (i18n may not be loaded in this env —
- * raw keys show up) and always falls back to an Enter keystroke. */
+ * raw keys show up) and always falls back to an Enter keystroke.
+ */
 async function sendInCopilot(session, text) {
   await session.evaluate(`(() => {
     const ta = document.querySelector('.copilot-input textarea')
@@ -83,8 +85,10 @@ async function sendInCopilot(session, text) {
   })()`)
 }
 
-/** fetch with fresh connections + retries — immune to the web server's
- * restart window (pooled sockets die when the listener restarts). */
+/**
+ * fetch with fresh connections + retries — immune to the web server's
+ * restart window (pooled sockets die when the listener restarts).
+ */
 async function fetchRetry(url, options = {}, tries = 6) {
   let lastError = null
   for (let attempt = 0; attempt < tries; attempt++) {
@@ -103,8 +107,10 @@ function cleanupAll() {
     try { p.kill('SIGTERM') }
     catch {}
   }
-  try { execSync('pkill -f "Xvfb :99" 2>/dev/null || true') } catch {}
-  try { execSync('pkill -f "electron . --remote-debugging-port=9222" 2>/dev/null || true') } catch {}
+  try { execSync('pkill -f "Xvfb :99" 2>/dev/null || true') }
+  catch {}
+  try { execSync('pkill -f "electron . --remote-debugging-port=9222" 2>/dev/null || true') }
+  catch {}
 }
 process.on('exit', cleanupAll)
 process.on('SIGINT', () => { cleanupAll(); process.exit(130) })
@@ -244,9 +250,12 @@ async function main() {
   console.log(`repo: ${REPO}`)
 
   // clean leftovers
-  try { execSync('pkill -f "electron . --remote-debugging-port=9222" || true', { shell: '/bin/bash' }) } catch {}
-  try { execSync('pkill -f "tests/e2e/fake-adb-server" || true', { shell: '/bin/bash' }) } catch {}
-  try { execSync('pkill -f "tests/e2e/mock-llm-server" || true', { shell: '/bin/bash' }) } catch {}
+  try { execSync('pkill -f "electron . --remote-debugging-port=9222" || true', { shell: '/bin/bash' }) }
+  catch {}
+  try { execSync('pkill -f "tests/e2e/fake-adb-server" || true', { shell: '/bin/bash' }) }
+  catch {}
+  try { execSync('pkill -f "tests/e2e/mock-llm-server" || true', { shell: '/bin/bash' }) }
+  catch {}
   await sleep(800)
 
   // ── infrastructure ───────────────────────────────────────
@@ -897,7 +906,7 @@ async function main() {
 
   await ctrl(LLM_CTRL, 'POST', '/script', { steps: [{ text: 'REPAIRED_AFTER_DANGLING' }] })
   const repairedChat = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
-    method: 'POST', headers: { 'content-type': 'application/json', cookie: `escrcpy_web=${cookieToken}` },
+    method: 'POST', headers: { 'content-type': 'application/json', 'cookie': `escrcpy_web=${cookieToken}` },
     body: JSON.stringify({ sessionId: webSessionId, content: 'continue after crash', stream: false }),
   }).then(r => r.json())
   const repairedSession = (readStore()?.copilot?.sessions || []).find(s => s.id === webSessionId)
@@ -922,15 +931,15 @@ async function main() {
     const deadline = Date.now() + 45000
     while (Date.now() < deadline) {
       // sample both conditions on each poll
-      // eslint-disable-next-line no-await-in-loop
+
       const banner = await copilot2.evaluate(`document.body.innerText.includes('正在自动重连') || document.body.innerText.includes('auto reconnecting') || document.body.innerText.includes('copilot.reconnect.banner')`)
       if (banner)
         sawReconnectBanner = true
-      // eslint-disable-next-line no-await-in-loop
+
       const done = await copilot2.evaluate(`document.body.innerText.includes('RECONNECT_RECOVERED_ANSWER')`)
       if (done)
         return true
-      // eslint-disable-next-line no-await-in-loop
+
       await sleep(300)
     }
     return false
@@ -955,7 +964,7 @@ async function main() {
 
   await sendInCopilot(copilot2, '这轮会失败')
 
-  await waitFor(() => copilot2.evaluate(`/(auto-reconnected 5 times|\u91cd\u8fde 5 \u6b21|copilot\.reconnect\.exhausted)/.test(document.body.innerText)`), { timeoutMs: 60000, intervalMs: 800, label: 'exhausted error banner' })
+  await waitFor(() => copilot2.evaluate(`/(auto-reconnected 5 times|\u91CD\u8FDE 5 \u6B21|copilot\.reconnect\.exhausted)/.test(document.body.innerText)`), { timeoutMs: 60000, intervalMs: 800, label: 'exhausted error banner' })
   check('S10.5 persistent failures surface a clear error after retries exhausted', true)
 
   // next turn must succeed cleanly (no error inertia)
@@ -1045,7 +1054,7 @@ async function main() {
   ] })
   const multiChat = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: `escrcpy_web=${cookieToken}` },
+    headers: { 'content-type': 'application/json', 'cookie': `escrcpy_web=${cookieToken}` },
     body: JSON.stringify({ content: 'tap on all my devices', agentMode: true, deviceIds: ['E2ETEST001', 'E2ETEST002'], stream: false, name: 'multi-device e2e' }),
   }).then(r => r.json())
   check('S11.6 multi-device AI conversation completes (broadcast tool round)', Boolean(multiChat?.success && String(multiChat?.output || '').includes('MULTI_DEVICE_AI_DONE')), JSON.stringify(multiChat)?.slice(0, 140))
@@ -1053,6 +1062,64 @@ async function main() {
   const { calls: postAiCalls } = await ctrl(ADB_CTRL, 'GET', '/calls')
   const aiTapped = new Set(postAiCalls.filter(c => (c.command.includes('input tap') || c.command.includes('-touch')) && c.command.includes('77')).map(c => c.serial))
   check('S11.7 AI broadcast_tap reached BOTH devices in one conversation', aiTapped.has('E2ETEST001') && aiTapped.has('E2ETEST002'), [...aiTapped].join(','))
+
+  // ════════ S12 · v3.10.0: embedded mirror (内嵌镜像) + keyboard mapping ════════
+  console.log('\n[S12] embedded mirror (内嵌镜像) + keyboard mapping')
+
+  const mirrorStatus = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('mirror:status', { deviceId: 'E2ETEST001' })
+    return JSON.stringify(r)
+  })()`)
+  let statusOk = false
+  try {
+    statusOk = JSON.parse(mirrorStatus)?.success === true && JSON.parse(mirrorStatus)?.running === false
+  }
+  catch {}
+  check('S12.1 mirror:status IPC responds (no session yet)', statusOk, mirrorStatus.slice(0, 140))
+
+  const mirrorStart = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('mirror:start', { deviceId: 'E2ETEST001', options: { audio: false } })
+    return JSON.stringify(r)
+  })()`)
+  let startHandled = false
+  try {
+    const parsed = JSON.parse(mirrorStart)
+    startHandled = parsed?.success === false && Boolean(parsed?.error?.message)
+  }
+  catch {}
+  check('S12.2 mirror:start fails gracefully without a real scrcpy device', startHandled, mirrorStart.slice(0, 180))
+
+  const keymapSaved = await main2.evaluate(`(async () => {
+    const mapping = {
+      id: 'map_e2e', kind: 'tap', enabled: true,
+      trigger: { combo: 'KeyQ' }, position: { x: 0.25, y: 0.75 }, action: { type: 'tap' },
+    }
+    const profile = { id: 'profile_e2e', name: 'E2E', mappings: [mapping], settings: { behaviorLevel: 'medium' } }
+    const saved = await window.$preload.ipcxRenderer.invoke('mirror:keymap:save', {
+      deviceId: 'E2ETEST001', profiles: [profile], activeId: profile.id, settings: {},
+    })
+    const loaded = await window.$preload.ipcxRenderer.invoke('mirror:keymap:get', { deviceId: 'E2ETEST001' })
+    return JSON.stringify({ saved, loaded })
+  })()`)
+  let keymapOk = false
+  try {
+    const parsed = JSON.parse(keymapSaved)
+    const loaded = parsed?.loaded
+    const profile = (loaded?.profiles || []).find(p => p.id === 'profile_e2e')
+    keymapOk = Boolean(profile && profile.mappings?.[0]?.trigger?.combo === 'KeyQ' && profile.mappings[0].position.x === 0.25)
+  }
+  catch {}
+  check('S12.3 keyboard mapping profile persists (save → load)', keymapOk, keymapSaved.slice(0, 180))
+
+  const webMirrorStatus = await fetch(`http://127.0.0.1:${WEB_PORT}/api/mirror/status`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.json()).catch(() => null)
+  check('S12.4 web /api/mirror/status responds', Boolean(webMirrorStatus?.success), JSON.stringify(webMirrorStatus)?.slice(0, 120))
+
+  const webKeymap = await fetch(`http://127.0.0.1:${WEB_PORT}/api/mirror/keymap?deviceId=E2ETEST001`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.json()).catch(() => null)
+  const webProfile = (webKeymap?.profiles || []).find(p => p.id === 'profile_e2e')
+  check('S12.5 web keymap API returns the saved profile', Boolean(webProfile && webProfile.mappings?.length === 1), JSON.stringify(webKeymap)?.slice(0, 140))
+
+  const webPage = await fetch(`http://127.0.0.1:${WEB_PORT}/`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.text()).catch(() => '')
+  check('S12.6 web page ships the mirror tab + WebCodecs decoder', webPage.includes('tab-mirror') && webPage.includes('VideoDecoder'), `len=${webPage.length}`)
 
   // teardown
   main.close(); main2.close(); copilot.close(); copilot2.close()

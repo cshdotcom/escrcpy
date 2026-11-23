@@ -41,6 +41,7 @@ declare module 'vue' {
     ElIconFullScreen: typeof import('@element-plus/icons-vue')['FullScreen']
     ElIconGrid: typeof import('@element-plus/icons-vue')['Grid']
     ElIconLoading: typeof import('@element-plus/icons-vue')['Loading']
+    ElIconMicrophone: typeof import('@element-plus/icons-vue')['Microphone']
     ElIconPlus: typeof import('@element-plus/icons-vue')['Plus']
     ElIconRank: typeof import('@element-plus/icons-vue')['Rank']
     ElIconRight: typeof import('@element-plus/icons-vue')['Right']

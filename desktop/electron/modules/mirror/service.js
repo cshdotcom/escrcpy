@@ -160,8 +160,10 @@ function touch(deviceId, payload) {
   const entry = sessions.get(String(deviceId))
   if (!entry)
     return false
-  const width = entry.session.width || payload.videoWidth || 1
-  const height = entry.session.height || payload.videoHeight || 1
+  const width = entry.session.width
+  const height = entry.session.height
+  if (!width || !height)
+    return false
   const x = payload.normalized ? Math.round((Number(payload.x) || 0) * width) : Math.round(Number(payload.x) || 0)
   const y = payload.normalized ? Math.round((Number(payload.y) || 0) * height) : Math.round(Number(payload.y) || 0)
   return entry.session.sendControl({
@@ -200,8 +202,10 @@ function scroll(deviceId, payload) {
   const entry = sessions.get(String(deviceId))
   if (!entry)
     return false
-  const width = entry.session.width || 1
-  const height = entry.session.height || 1
+  const width = entry.session.width
+  const height = entry.session.height
+  if (!width || !height)
+    return false
   return entry.session.sendControl({
     type: 3,
     x: payload.normalized ? Math.round((Number(payload.x) || 0) * width) : Math.round(Number(payload.x) || 0),

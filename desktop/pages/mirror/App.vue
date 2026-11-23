@@ -21,6 +21,12 @@
         </el-button>
       </el-tooltip>
 
+      <el-tooltip :content="audioEnabled ? '关闭声音' : '开启声音'" placement="bottom">
+        <el-button text size="small" class="!px-1.5" :class="audioEnabled ? 'text-primary-400' : 'text-white/70'" @click="toggleAudio">
+          <el-icon><ElIconMicrophone /></el-icon>
+        </el-button>
+      </el-tooltip>
+
       <el-tooltip :content="$t('mirror.header.fullscreen')" placement="bottom">
         <el-button text size="small" class="!px-1.5 text-white/70" @click="toggleFullscreen">
           <el-icon><ElIconFullScreen /></el-icon>
@@ -149,7 +155,7 @@ const { currentDevice } = useWindowStateSync({ deviceSync: true })
 const deviceId = computed(() => currentDevice.value?.id || window.$preload?.payload?.device?.id || '')
 const deviceName = computed(() => deviceStore.getLabel(currentDevice.value, ({ deviceName }) => deviceName))
 
-const audioEnabled = ref(false)
+const audioEnabled = ref(true)
 const alwaysOnTop = ref(false)
 const panelVisible = ref(false)
 const workflows = ref([])
@@ -489,6 +495,11 @@ function toggleAlwaysOnTop() {
   window.$preload.ipcxRenderer.invoke('mirror:window', { action: 'always-on-top' }).then((result) => {
     alwaysOnTop.value = Boolean(result?.value)
   })
+}
+
+async function toggleAudio() {
+  audioEnabled.value = !audioEnabled.value
+  await start({ audio: audioEnabled.value })
 }
 
 function toggleFullscreen() {

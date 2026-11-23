@@ -124,7 +124,7 @@ export class MirrorSession {
 
     return [
       `scid=${this.scid}`,
-      'log_level=warn',
+      'log_level=info',
       `video_codec=${videoCodec}`,
       `video_bit_rate=${Number(videoBitRate) || 8_000_000}`,
       `max_size=${Number(maxSize) || 1080}`,
@@ -164,13 +164,22 @@ export class MirrorSession {
         reject(new Error(`scrcpy server did not start: ${stderr || stdout || 'timeout'}`))
       }, 12000)
 
+      let settled = false
+      const settle = () => {
+        if (settled)
+          return
+        settled = true
+        cleanup()
+        resolve()
+      }
       const onStdout = (chunk) => {
         stdout += chunk.toString()
-        if (/Listening on|INFO:\s+Device:/i.test(stdout)) {
-          cleanup()
-          resolve()
-        }
+        // The server prints "[server] INFO: Device: [" (or "Listening on …")
+        // once it is accepting connections. Any output means it booted.
+        if (stdout.trim())
+          settle()
       }
+      setTimeout(settle, 3000).unref?.()
       const onStderr = (chunk) => {
         stderr += chunk.toString()
       }
@@ -216,14 +225,16 @@ export class MirrorSession {
     return port
   }
 
-  connectSocket(port) {
-    return new Promise((resolve, reject) => {
+  connectSocket(port, { attempts = 12, interval = 350 } = {}) {
+    let attempt = 0
+    const tryConnect = () => new Promise((resolve, reject) => {
+      attempt += 1
       const socket = net.connect({ host: '127.0.0.1', port })
       socket.setNoDelay(true)
       const timer = setTimeout(() => {
         socket.destroy()
         reject(new Error(`Timed out connecting to forwarded port ${port}`))
-      }, 10000)
+      }, 8000)
       socket.once('connect', () => {
         clearTimeout(timer)
         resolve(socket)
@@ -232,6 +243,21 @@ export class MirrorSession {
         clearTimeout(timer)
         reject(error)
       })
+    })
+
+    return new Promise((resolve, reject) => {
+      const next = async () => {
+        try {
+          resolve(await tryConnect())
+        }
+        catch (error) {
+          if (attempt >= attempts)
+            reject(new Error(`Could not connect to scrcpy stream: ${error.message}`))
+          else
+            setTimeout(next, interval)
+        }
+      }
+      next()
     })
   }
 
@@ -269,13 +295,13 @@ export class MirrorSession {
     const socket = await this.connectSocket(port)
     this.videoSocket = socket
 
-    const metadata = await this.readExact(socket, 73)
+    // scrcpy 3.x/4.x device meta: 64-byte device name + u32 codec id.
+    // Width/height arrive in the first "session" frame packet instead.
+    const metadata = await this.readExact(socket, 68)
     const name = metadata.subarray(0, 64)
     const end = name.indexOf(0)
     const deviceName = name.subarray(0, end === -1 ? 64 : end).toString('utf8')
-    this.width = metadata.readUInt32BE(64)
-    this.height = metadata.readUInt32BE(68)
-    const codecValue = metadata.readUInt32BE(69)
+    const codecValue = metadata.readUInt32BE(64)
 
     const codec
       = codecValue === 0x68323635
@@ -315,10 +341,19 @@ export class MirrorSession {
 
   async startAudio() {
     const port = await this.forwardPort()
+    const guard = new Promise(resolve => setTimeout(() => resolve('timeout'), 6000))
     const socket = await this.connectSocket(port)
     this.audioSocket = socket
 
-    const header = await this.readExact(socket, 4)
+    const readHeader = this.readExact(socket, 4)
+    readHeader.catch(() => {})
+    const header = await Promise.race([readHeader, guard]).catch(() => null)
+    if (!header || header === 'timeout') {
+      socket.destroy()
+      this.audioSocket = null
+      this.emit({ type: 'audio-disabled', reason: 'timeout' })
+      return
+    }
     const codecValue = header.readUInt32BE(0)
 
     if (codecValue === 0 || codecValue === 1) {

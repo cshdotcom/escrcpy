@@ -2,10 +2,11 @@
  * Unit tests for the embedded mirror protocol + keyboard mapping engine.
  * Run: node --test tests/unit/mirror.test.mjs
  */
+/* eslint-disable test/no-import-node-test */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ANDROID_KEYCODE, FrameStreamParser, encodeControlMessage } from '../../desktop/electron/modules/mirror/protocol.js'
+import { ANDROID_KEYCODE, encodeControlMessage, FrameStreamParser } from '../../desktop/electron/modules/mirror/protocol.js'
 import { comboFromEvent, createMapping, createProfile, validateMapping, validateProfile } from '../../desktop/pages/mirror/composables/use-keyboard-mapping.js'
 
 function makeHeader(flags, pts, length) {
