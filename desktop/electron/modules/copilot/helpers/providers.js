@@ -99,7 +99,17 @@ async function aiFetch(url, options = {}, signal) {
   }
 
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal })
+    // `Connection: close` defeats keep-alive socket reuse. Relay/proxy AI
+    // endpoints aggressively close idle keep-alive connections; a reused
+    // half-dead socket fails the NEXT request with `terminated`/ECONNRESET
+    // — the classic "test connection succeeds, real chat randomly fails"
+    // (short probes always get a fresh socket, streaming chats reuse one).
+    // Forcing one-shot connections removes that failure class entirely.
+    const response = await fetch(url, {
+      ...options,
+      headers: { connection: 'close', ...(options.headers || {}) },
+      signal: controller.signal,
+    })
     resetIdle()
 
     if (!response.ok) {
@@ -177,6 +187,16 @@ async function aiFetch(url, options = {}, signal) {
         return 'the server'
       }
     })()
+
+    // Stream interruption: the server/proxy cut the connection mid-body.
+    // undici surfaces this as a bare TypeError "terminated" — map it to a
+    // descriptive, retryable code instead of a cryptic one-word error.
+    const raw = String(cause?.message ?? error?.message ?? '')
+    if (/terminated|socket hang up|other side closed|ECONNRESET|EPIPE/i.test(raw)
+      || ['ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(cause?.code)) {
+      throw new AIError(`Connection to ${host} was interrupted mid-stream (this is usually transient — retrying)`, 'NETWORK_ERROR')
+    }
+
     const message = ['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ETIMEDOUT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(cause?.code)
       ? `Cannot reach ${host}: ${cause?.code ?? cause?.message}`
       : (cause?.message ?? error?.message ?? 'Network error')
@@ -879,7 +899,24 @@ export function getProvider(apiType) {
 
 export function chatWithProvider(options) {
   const provider = getProvider(options.config?.apiType)
-  return provider.chat(options)
+  return provider.chat(options).catch((error) => {
+    if (error instanceof AIError)
+      throw error
+
+    // Mid-stream failures surface RAW from the body reader (aiFetch's catch
+    // only covers the initial fetch): undici throws a bare TypeError
+    // "terminated" when a proxy cuts the connection mid-body, and user
+    // aborts surface as AbortError. Classify both here so every layer above
+    // (renderer auto-reconnect, task retry, web SSE) sees a proper code.
+    if (error?.name === 'AbortError' || /abort/i.test(String(error?.message ?? '')))
+      throw new AIError('Request aborted', 'ABORTED')
+
+    const raw = String(error?.cause?.message ?? error?.message ?? error ?? 'Network error')
+    if (/terminated|socket hang up|other side closed|ECONNRESET|EPIPE|network|fetch failed/i.test(raw))
+      throw new AIError(`Connection to the AI server was interrupted: ${raw} (usually transient — safe to retry)`, 'NETWORK_ERROR')
+
+    throw new AIError(raw, 'UNKNOWN_ERROR')
+  })
 }
 
 export function fetchModelsWithProvider(config, signal) {
@@ -887,38 +924,58 @@ export function fetchModelsWithProvider(config, signal) {
   return provider.fetchModels(config, signal)
 }
 
-/** Lightweight connectivity probe: prefer the models endpoint, fall back to a 1-token chat request. */
+/**
+ * Connectivity probe. Tests the paths a real conversation actually uses:
+ *  1. the models endpoint (skippable — some relays disable it),
+ *  2. a non-streaming chat round-trip,
+ *  3. a STREAMING chat round-trip — the default chat path. A relay with a
+ *     broken SSE path passes every short probe but fails real conversations
+ *     ("测试连接成功但对话报错"); probing it here surfaces the mismatch at
+ *     test time instead of mid-chat.
+ */
 export async function testConnection(config, signal) {
   const startedAt = Date.now()
   const provider = getProvider(config.apiType)
 
+  const probe = streaming => provider.chat({
+    config: { ...config, streaming, maxOutputTokens: 1, temperature: 0 },
+    messages: [
+      { role: 'system', content: 'You are a connectivity probe. Reply with the single character: 0' },
+      { role: 'user', content: 'ping' },
+    ],
+    tools: [],
+    signal,
+    onEvent: () => {},
+  })
+
+  let models = []
   try {
-    const models = await provider.fetchModels(config, signal)
-    return {
-      success: true,
-      latency: Date.now() - startedAt,
-      models,
-      model: models.includes(config.model) ? config.model : models[0],
-    }
+    models = await provider.fetchModels(config, signal)
+  }
+  catch {
+    // Some providers disable the models endpoint; the chat probes below are
+    // the real signal.
+  }
+
+  // Non-streaming round-trip — the hard requirement.
+  await probe(false)
+
+  // Streaming round-trip — a warning (not a failure) when broken, because
+  // the user can still chat with streaming disabled.
+  let streamingOk = true
+  try {
+    await probe(true)
   }
   catch (error) {
-    // Some providers disable the models endpoint; try a minimal chat round-trip.
-    try {
-      await provider.chat({
-        config: { ...config, streaming: false, maxOutputTokens: 1, temperature: 0 },
-        messages: [
-          { role: 'system', content: 'You are a connectivity probe. Reply with the single character: 0' },
-          { role: 'user', content: 'ping' },
-        ],
-        tools: [],
-        signal,
-        onEvent: () => {},
-      })
+    console.warn('[Copilot] streaming probe failed:', error?.message ?? error)
+    streamingOk = false
+  }
 
-      return { success: true, latency: Date.now() - startedAt, models: [], model: config.model }
-    }
-    catch (chatError) {
-      throw chatError instanceof AIError ? chatError : error
-    }
+  return {
+    success: true,
+    latency: Date.now() - startedAt,
+    models,
+    streamingOk,
+    model: models.includes(config.model) ? config.model : (models[0] || config.model),
   }
 }

@@ -48,7 +48,7 @@
 
           <el-table-column prop="status" :label="$t('tasks.history.status')" width="90">
             <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'SUCCESS' ? 'success' : row.status === 'RUNNING' ? 'info' : 'danger'" class="!m-0">
+              <el-tag size="small" :type="row.status === 'SUCCESS' ? 'success' : row.status === 'RUNNING' ? 'info' : row.status === 'SKIPPED' ? 'warning' : 'danger'" class="!m-0">
                 {{ $t(`tasks.status.${row.status.toLowerCase()}`) }}
               </el-tag>
             </template>

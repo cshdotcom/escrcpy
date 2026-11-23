@@ -23,6 +23,7 @@ import {
   compactSessionContext,
   estimateTokens,
   isDangerousShell,
+  sanitizeSessionMessages,
 } from '@escrcpy/shared'
 import { yadbPath } from '$electron/configs/index.js'
 import { setupEnvPath } from '$electron/process/helper.js'
@@ -232,8 +233,12 @@ function getCopilotSettings() {
   return electronStore.get('copilot.settings') || {}
 }
 
-// ── persistent task conversations (sessionMode: 'continue') ──
+// ── persistent task conversations (sessionMode) ──────────
 const SESSIONS_KEY = 'copilot.sessions'
+
+// Stable id of the one conversation shared by every task using sessionMode
+// "shared" ("所有自动任务共用一个上下文").
+const SHARED_SESSION_ID = 'session_shared_tasks'
 
 function getSessions() {
   const value = electronStore.get(SESSIONS_KEY)
@@ -241,32 +246,103 @@ function getSessions() {
 }
 
 /**
- * Find (or create) the persistent conversation owned by a task. Task sessions
- * carry `taskId`, are scoped to the task's device so they show up in the
- * Copilot window opened for that device, and survive across runs.
+ * Session picker payload for the task editor and the web UI: every existing
+ * conversation (any scope) with enough metadata to choose one, minus the
+ * (potentially huge) message arrays.
  */
-function findOrCreateTaskSession(task, config) {
-  const sessions = getSessions()
-  let session = sessions.find(item => item?.taskId === task.id)
+export function listSessionsForPicker() {
+  return getSessions()
+    .filter(session => session?.id)
+    .map(session => ({
+      id: session.id,
+      name: session.name || '',
+      scope: session.scope || '',
+      taskId: session.taskId || '',
+      deviceId: session.deviceId || '',
+      messageCount: Array.isArray(session.messages) ? session.messages.length : 0,
+      updatedAt: session.updatedAt || '',
+      createdAt: session.createdAt || '',
+    }))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+}
 
+/**
+ * Create a blank conversation object. Scope keeps conversations grouped in
+ * the Copilot sidebar; device-scoped ones show up in the window opened for
+ * that device, task-scoped ones stay private to their task, shared/web ones
+ * group under their own bucket.
+ */
+function createSession({ scope, name, deviceId, taskId }) {
+  return {
+    id: uid('session'),
+    taskId: taskId || '',
+    scope: scope || 'default',
+    name: name || '',
+    deviceId: deviceId || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+  }
+}
+
+/**
+ * Resolve which conversation a task run should use, by sessionMode:
+ *  - 'new'      every run starts a fresh throwaway context (nothing persisted)
+ *  - 'continue' the task's own persistent conversation (created on first run)
+ *  - 'existing' a user-selected conversation (config.sessionId), so a task can
+ *               continue a conversation started in the Copilot or web UI
+ *  - 'shared'   ONE global conversation shared by every task in 'shared' mode,
+ *               so all scheduled tasks reason inside the same context
+ *
+ * Returns { sessions, session, persisted } — `persisted` tells the caller
+ * whether the conversation must be saved back to the store afterwards.
+ */
+export function resolveTaskSession(task, config = {}) {
+  const mode = config.sessionMode || 'new'
+  const sessions = getSessions()
+
+  // Fresh context each run: an unsaved scratch conversation.
+  if (mode === 'new')
+    return { sessions, session: { messages: [] }, persisted: false }
+
+  // One shared global conversation across all 'shared' tasks.
+  if (mode === 'shared') {
+    let session = sessions.find(item => item.id === SHARED_SESSION_ID)
+    if (!session) {
+      session = createSession({
+        scope: 'shared:tasks',
+        name: 'Shared task context',
+        deviceId: config.deviceId || '',
+      })
+      session.id = SHARED_SESSION_ID
+      sessions.unshift(session)
+    }
+    return { sessions, session, persisted: true }
+  }
+
+  // A user-picked existing conversation — falls back to the task's own when
+  // the selected conversation was deleted.
+  if (mode === 'existing') {
+    const picked = sessions.find(item => item.id === config.sessionId)
+    if (picked)
+      return { sessions, session: picked, persisted: true }
+  }
+
+  // 'continue' (and the fallback for a deleted 'existing' pick): the task's
+  // own persistent conversation, scoped to its device so a Copilot window
+  // opened for that device displays it.
+  let session = sessions.find(item => item?.taskId === task.id && item.id !== SHARED_SESSION_ID)
   if (!session) {
-    session = {
-      id: uid('session'),
+    session = createSession({
       taskId: task.id,
-      // scope the session to the device so a Copilot window opened for that
-      // device displays the task conversation; device-less tasks get a
-      // private scope only they can see.
       scope: config.deviceId || `task:${task.id}`,
       name: task.name || 'Scheduled task',
       deviceId: config.deviceId || '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-    }
+    })
     sessions.unshift(session)
   }
 
-  return { sessions, session }
+  return { sessions, session, persisted: true }
 }
 
 function saveSessions(sessions, session) {
@@ -276,16 +352,26 @@ function saveSessions(sessions, session) {
   electronStore.set(SESSIONS_KEY, list)
 }
 
-async function collectAiText(config, messages) {
+/** Save one conversation back to the store (upsert by id). */
+export function persistSession(session) {
+  if (!session?.id)
+    return
+  saveSessions(getSessions(), session)
+}
+
+async function collectAiText(config, messages, onEvent, signal) {
   let text = ''
 
   await chatWithProvider({
     config,
     messages,
     tools: [],
+    signal,
     onEvent: (event) => {
-      if (event.type === 'text-delta')
+      if (event.type === 'text-delta') {
         text += event.text
+        onEvent?.({ type: 'text-delta', text: event.text })
+      }
     },
   })
 
@@ -309,16 +395,17 @@ async function callAiWithRetry(config, messages, options = {}) {
   let lastError = null
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await collectAiText(config, messages)
+      return await collectAiText(config, messages, options.onEvent, options.signal)
     }
     catch (error) {
       lastError = error
       if (!retryable || attempt === maxRetries)
         break
 
-      // Don't retry on auth/config errors — they won't fix themselves.
+      // Don't retry on auth/config errors — they won't fix themselves —
+      // and never retry a user abort.
       const code = error?.code || ''
-      if (['INVALID_API_KEY', 'INVALID_MODEL', 'CONFIG_INCOMPLETE'].includes(code))
+      if (['INVALID_API_KEY', 'INVALID_MODEL', 'CONFIG_INCOMPLETE', 'ABORTED'].includes(code))
         break
 
       const backoff = Math.min(1000 * 2 ** attempt, 8000)
@@ -509,7 +596,7 @@ async function executeAgentTool(name, args, context, settings) {
 }
 
 /** One LLM round inside the agent loop: returns the assembled assistant message. */
-async function agentRound(vendorConfig, messages, tools) {
+async function agentRound(vendorConfig, messages, tools, onEvent, signal) {
   let text = ''
   const toolCalls = []
 
@@ -517,9 +604,12 @@ async function agentRound(vendorConfig, messages, tools) {
     config: vendorConfig,
     messages,
     tools,
+    signal,
     onEvent: (event) => {
-      if (event.type === 'text-delta')
+      if (event.type === 'text-delta') {
         text += event.text
+        onEvent?.({ type: 'text-delta', text: event.text })
+      }
       if (event.type === 'tool-call') {
         toolCalls.push({
           id: event.toolCall.id,
@@ -529,6 +619,7 @@ async function agentRound(vendorConfig, messages, tools) {
             arguments: JSON.stringify(event.toolCall.arguments ?? {}),
           },
         })
+        onEvent?.({ type: 'tool-call', toolCall: event.toolCall })
       }
     },
   })
@@ -545,7 +636,7 @@ async function agentRound(vendorConfig, messages, tools) {
  * tool set as the interactive Copilot and operates the device until it stops
  * calling tools (or the configured step limit hits — 0 means unlimited).
  */
-async function runAiAgentLoop({ vendorConfig, settings, session, config, promptText }) {
+async function runAiAgentLoop({ vendorConfig, settings, session, config, promptText, onEvent, signal }) {
   const adbxSettings = settings
   const tools = buildAiToolSchemas({ allowShell: adbxSettings.allowShell !== false })
 
@@ -560,6 +651,9 @@ async function runAiAgentLoop({ vendorConfig, settings, session, config, promptT
   const rawMaxSteps = Number(settings.maxSteps)
   const maxSteps = Number.isFinite(rawMaxSteps) && rawMaxSteps > 0 ? rawMaxSteps : 0
 
+  const aborted = () => signal?.aborted === true
+  const abortError = () => Object.assign(new Error('Aborted'), { code: 'ABORTED' })
+
   session.messages.push({
     id: uid('msg'),
     role: 'user',
@@ -572,6 +666,8 @@ async function runAiAgentLoop({ vendorConfig, settings, session, config, promptT
 
   // maxSteps 0 means unlimited — run until the model stops calling tools.
   for (;;) {
+    if (aborted())
+      throw abortError()
     if (maxSteps > 0 && steps >= maxSteps)
       break
 
@@ -594,7 +690,8 @@ async function runAiAgentLoop({ vendorConfig, settings, session, config, promptT
     })
 
     steps++
-    const assistantMessage = await agentRound(vendorConfig, messages, tools)
+    onEvent?.({ type: 'step', step: steps })
+    const assistantMessage = await agentRound(vendorConfig, messages, tools, onEvent, signal)
     session.messages.push({
       id: uid('msg'),
       role: 'assistant',
@@ -610,6 +707,9 @@ async function runAiAgentLoop({ vendorConfig, settings, session, config, promptT
       break
 
     for (const call of toolCalls) {
+      if (aborted())
+        throw abortError()
+
       const toolName = call.function?.name || 'unknown'
       let args = {}
       try {
@@ -632,6 +732,7 @@ async function runAiAgentLoop({ vendorConfig, settings, session, config, promptT
       try {
         toolMessage.content = await executeAgentTool(toolName, args, context, adbxSettings)
         toolMessage.status = 'completed'
+        onEvent?.({ type: 'tool-result', name: toolName, status: 'completed' })
 
         // Vision bridge: attach the latest screenshot to the tool message; the
         // shared buildApiMessages re-sends it as a user image message.
@@ -673,10 +774,15 @@ export async function runAiPrompt(config = {}, task = null) {
     if (!config.deviceId)
       throw new Error('Agent tasks need a target device')
 
-    const useSession = config.sessionMode === 'continue' && task?.id
-    const { sessions, session } = useSession
-      ? findOrCreateTaskSession(task, config)
-      : { sessions: null, session: { messages: [] } }
+    // Session policy: 'new' | 'continue' | 'existing' | 'shared' (see
+    // resolveTaskSession). Without a owning task only 'new' makes sense.
+    const mode = task?.id ? (config.sessionMode || 'new') : 'new'
+    const { sessions, session, persisted: useSession } = resolveTaskSession(task || { id: 'adhoc' }, { ...config, sessionMode: mode })
+
+    // Error isolation: a previous interrupted run may have left unanswered
+    // tool_calls in the conversation, which would make EVERY follow-up
+    // request fail with a provider 400. Repair before building context.
+    sanitizeSessionMessages(session)
 
     const context = await buildDeviceContext({ ...config, includeDeviceInfo: true })
     const promptText = context.note ? `${prompt}\n\n${context.note}` : prompt
@@ -692,10 +798,11 @@ export async function runAiPrompt(config = {}, task = null) {
   }
 
   // ── plain text mode ─────────────────────────────────────────
-  const useSession = config.sessionMode === 'continue' && task?.id
-  const { sessions, session } = useSession
-    ? findOrCreateTaskSession(task, config)
-    : { sessions: null, session: { messages: [] } }
+  const plainMode = task?.id ? (config.sessionMode || 'new') : 'new'
+  const { sessions, session, persisted: useSession } = resolveTaskSession(task || { id: 'adhoc' }, { ...config, sessionMode: plainMode })
+
+  // Error isolation (see the agent-mode comment above).
+  sanitizeSessionMessages(session)
 
   try {
     const context = await buildDeviceContext(config)
@@ -762,6 +869,173 @@ export async function runAiPrompt(config = {}, task = null) {
   finally {
     if (useSession)
       saveSessions(sessions, session)
+  }
+}
+
+// ── Web chat (embedded web UI rides the same engine) ─────
+/**
+ * Running web chats keyed by sessionId so the web server can abort them
+ * (web "stop generating" button).
+ */
+const runningWebChats = new Map()
+
+export function abortWebChat(sessionId) {
+  const controller = runningWebChats.get(sessionId)
+  if (!controller)
+    return false
+  controller.abort(new Error('Aborted from web'))
+  return true
+}
+
+/**
+ * One chat turn from the embedded web UI. Reuses the same provider stack,
+ * agent tool set and session store as the desktop Copilot, streaming events
+ * back through `onEvent` so the browser renders deltas as they arrive.
+ *
+ * @param {object} options
+ * @param {string} options.sessionId conversation to append to ('' → create new)
+ * @param {string} options.content   the user message
+ * @param {boolean} options.agentMode give the model the device tool set
+ * @param {string} options.deviceId  target device for tools (agent mode)
+ * @param {string} [options.vendorId] vendor override; defaults to active vendor
+ * @param {string} [options.name]    name for a newly created conversation
+ * @param {(event: object) => void} [options.onEvent] streaming callback
+ * @param {(sessionId: string) => void} [options.onStart] fires once the session is resolved
+ */
+export async function runWebChat(options = {}) {
+  const {
+    sessionId = '',
+    content,
+    agentMode = false,
+    deviceId = '',
+    vendorId = '',
+    name = '',
+    onEvent,
+    onStart,
+  } = options
+
+  const text = String(content || '').trim()
+  if (!text)
+    throw new Error('Message content is empty')
+
+  const settings = getCopilotSettings()
+
+  // Resolve vendor: explicit pick → active vendor → first configured vendor.
+  const vendors = electronStore.get('copilot.settings.vendors') || {}
+  const pick = vendors[vendorId] || vendors[settings.activeVendorId] || Object.values(vendors).find(v => v?.baseUrl && v?.model)
+  if (!pick)
+    throw new Error('AI provider is not configured (missing Base URL / Model / API Key)')
+
+  const vendorConfig = {
+    apiType: pick.apiType,
+    baseUrl: pick.baseUrl,
+    apiKey: pick.apiKey,
+    model: pick.model,
+    temperature: pick.temperature,
+    maxOutputTokens: pick.maxOutputTokens,
+    // Stream from the provider so the browser sees real deltas through SSE.
+    streaming: true,
+    vision: pick.vision === true,
+  }
+
+  // Find or create the conversation (web conversations live in the same
+  // store; scope 'web' keeps them out of per-device Copilot windows).
+  const sessions = getSessions()
+  let session = sessionId ? sessions.find(item => item.id === sessionId) : null
+
+  if (sessionId && !session)
+    throw new Error('Conversation not found')
+
+  let created = false
+  if (!session) {
+    session = createSession({ scope: 'web', name: name || '', deviceId })
+    sessions.unshift(session)
+    created = true
+  }
+
+  if (deviceId)
+    session.deviceId = deviceId
+
+  // Error isolation: repair tool_calls left unanswered by an interrupted
+  // previous turn before appending to the conversation.
+  sanitizeSessionMessages(session)
+
+  const controller = new AbortController()
+  runningWebChats.set(session.id, controller)
+  // Lets the HTTP layer abort the turn when the browser disconnects, even
+  // for conversations created by this very call.
+  onStart?.(session.id)
+
+  try {
+    session.messages.push({
+      id: uid('msg'),
+      role: 'user',
+      content: text,
+      createdAt: new Date().toISOString(),
+    })
+
+    // Auto-compact before the turn when the conversation nears the budget.
+    if (settings.autoCompact !== false) {
+      const budget = Number(settings.contextWindow) || 32000
+      if (estimateTokens(session.messages) > budget * 0.75) {
+        const result = await compactSessionContext(session.messages, {
+          budgetTokens: budget,
+          noteText: '[context auto-compacted]',
+        })
+        if (result.compacted)
+          session.messages = result.messages
+      }
+    }
+
+    let result
+    if (agentMode) {
+      if (!session.deviceId)
+        throw new Error('Agent mode needs a target device')
+
+      result = await runAiAgentLoop({
+        vendorConfig,
+        settings,
+        session,
+        config: { deviceId: session.deviceId },
+        promptText: text,
+        onEvent,
+        signal: controller.signal,
+      })
+    }
+    else {
+      const messages = buildApiMessages(session.messages, {
+        systemPrompt: settings.systemPrompt || undefined,
+        vision: vendorConfig.vision,
+      })
+      onEvent?.({ type: 'step', step: 1 })
+
+      const output = await callAiWithRetry(vendorConfig, messages, {
+        maxRetries: settings.retryOnFailure !== false ? (Number(settings.maxRetries) || 3) : 0,
+        retryable: settings.retryOnFailure !== false,
+        signal: controller.signal,
+        onEvent,
+      })
+
+      session.messages.push({
+        id: uid('msg'),
+        role: 'assistant',
+        content: output,
+        createdAt: new Date().toISOString(),
+      })
+
+      result = { output, steps: 1 }
+    }
+
+    return {
+      output: result.output,
+      steps: result.steps,
+      sessionId: session.id,
+      created,
+    }
+  }
+  finally {
+    runningWebChats.delete(session.id)
+    saveSessions(sessions, session)
   }
 }
 

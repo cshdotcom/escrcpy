@@ -97,7 +97,7 @@
             </div>
           </el-form-item>
 
-          <!-- Session mode: fresh context each run, or one persistent conversation -->
+          <!-- Session mode: fresh context / task conversation / picked conversation / one shared context -->
           <el-form-item :label="$t('tasks.fields.sessionMode')">
             <div class="flex flex-col gap-2 w-full">
               <el-radio-group v-model="form.config.sessionMode">
@@ -107,7 +107,32 @@
                 <el-radio value="continue">
                   {{ $t('tasks.fields.sessionModeContinue') }}
                 </el-radio>
+                <el-radio value="existing">
+                  {{ $t('tasks.fields.sessionModeExisting') }}
+                </el-radio>
+                <el-radio value="shared">
+                  {{ $t('tasks.fields.sessionModeShared') }}
+                </el-radio>
               </el-radio-group>
+
+              <el-select
+                v-if="form.config.sessionMode === 'existing'"
+                v-model="form.config.sessionId"
+                size="small"
+                class="!w-full"
+                filterable
+                :placeholder="$t('tasks.fields.sessionPickerPlaceholder')"
+              >
+                <el-option
+                  v-for="session in sessions"
+                  :key="session.id"
+                  :value="session.id"
+                  :label="sessionLabel(session)"
+                />
+              </el-select>
+              <span v-if="form.config.sessionMode === 'existing' && !sessions.length" class="text-xs text-orange-500">
+                {{ $t('tasks.fields.sessionPickerEmpty') }}
+              </span>
               <span class="text-xs text-gray-400">{{ $t('tasks.fields.sessionModeHint') }}</span>
             </div>
           </el-form-item>
@@ -261,6 +286,27 @@ const isEditing = computed(() => Boolean(props.task?.id))
 
 const saving = ref(false)
 
+// Conversations for the "use existing conversation" context mode.
+const sessions = ref([])
+
+async function loadSessions() {
+  try {
+    const result = await window.$preload.ipcxRenderer.invoke('tasks:sessions')
+    if (result?.success)
+      sessions.value = result.sessions || []
+  }
+  catch {
+    sessions.value = []
+  }
+}
+
+function sessionLabel(session) {
+  const name = session.name || session.id
+  const scope = session.scope === 'web' ? 'Web' : session.scope === 'shared:tasks' ? 'Shared' : (session.deviceId || '')
+  const date = session.updatedAt ? formatDateTime(session.updatedAt) : ''
+  return `${name}${scope ? ` · ${scope}` : ''}${date ? ` · ${date}` : ''} (${session.messageCount} msg)`
+}
+
 const form = ref({
   id: '',
   name: '',
@@ -285,6 +331,8 @@ const selectedVendor = computed(() => {
 watch(() => props.visible, (value) => {
   if (!value)
     return
+
+  loadSessions()
 
   const task = props.task
 
@@ -401,6 +449,9 @@ async function handleSave() {
 
   if (form.value.type === 'AI' && form.value.config.agentMode === true && !config.deviceId)
     return ElMessage.warning(t('tasks.validation.agentDevice'))
+
+  if (form.value.type === 'AI' && config.sessionMode === 'existing' && !config.sessionId)
+    return ElMessage.warning(t('tasks.validation.sessionRequired'))
 
   if (form.value.type === 'WORKFLOW' && !config.workflowId)
     return ElMessage.warning(t('tasks.validation.workflow'))

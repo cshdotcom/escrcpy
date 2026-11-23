@@ -109,6 +109,15 @@
                 {{ $t('copilot.task.stepLimitReached', { current: streamingSteps, max: settings.maxSteps }) }}
               </div>
 
+              <!-- Auto-reconnect notice -->
+              <div
+                v-if="isReconnecting" class="self-center mt-2 px-3 py-1.5 rounded-full text-xs
+                bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300 flex items-center gap-1.5"
+              >
+                <i class="i-solar-restart-circle-linear animate-spin" />
+                {{ $t('copilot.reconnect.banner', { attempt: reconnectAttempt, max: reconnectMax }) }}
+              </div>
+
               <!-- Error notice -->
               <div
                 v-if="lastError && !isStreaming" class="self-start mt-2 px-3 py-1.5 rounded-md text-xs
@@ -199,6 +208,9 @@ const {
   activeVendor,
   isConfigured,
   isStreaming,
+  isReconnecting,
+  reconnectAttempt,
+  reconnectMax,
   streamingText,
   streamingSteps,
   stepLimitReached,

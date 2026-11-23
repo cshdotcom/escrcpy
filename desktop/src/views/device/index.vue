@@ -276,24 +276,63 @@ async function onAdbWatch(type, ret) {
 // signature and only triggers a full refresh when the state actually changed,
 // so a device that flapped to "offline" self-heals in the UI without the user
 // unplugging and replugging it.
+//
+// Double-confirmation: a single `adb devices` call can itself lie for a
+// moment (daemon hiccup, USB enumeration race) — that is exactly the
+// "connected device randomly shows offline" bug. A signature change is only
+// applied after a second poll taken 1.5s later agrees with the first.
 let devicePollTimer = null
 let lastRawSignature = null
+let confirmTimer = null
 
 async function pollDeviceStatus() {
   if (document.hidden)
     return
 
+  let raw
   try {
-    const raw = await window.$preload.adb.getRawDeviceList()
-    const signature = (raw || []).map(device => `${device.id}:${device.type}`).sort().join('|')
-
-    if (lastRawSignature !== null && signature !== lastRawSignature)
-      getDeviceData({ unloading: true })
-
-    lastRawSignature = signature
+    raw = await window.$preload.adb.getRawDeviceList()
   }
   catch {
     // adb hiccup — tracker reconnect + health check handle recovery
+    return
+  }
+
+  const signature = (raw || []).map(device => `${device.id}:${device.type}`).sort().join('|')
+  if (signature === lastRawSignature)
+    return
+
+  // First poll after mount: just record the baseline (the initial full load
+  // already happened in onMounted), nothing to double-confirm against.
+  if (lastRawSignature === null) {
+    lastRawSignature = signature
+    return
+  }
+
+  // A change away from the confirmed baseline: confirm before applying.
+  if (!confirmTimer) {
+    confirmTimer = setTimeout(async () => {
+      confirmTimer = null
+
+      try {
+        const recheck = await window.$preload.adb.getRawDeviceList()
+        const recheckSignature = (recheck || []).map(device => `${device.id}:${device.type}`).sort().join('|')
+
+        if (recheckSignature === signature && signature !== lastRawSignature) {
+          lastRawSignature = signature
+          getDeviceData({ unloading: true })
+        }
+        else if (recheckSignature === lastRawSignature) {
+          // transient flicker that already resolved — ignore it
+        }
+        else {
+          // a different state again — next poll cycle will re-confirm
+        }
+      }
+      catch {
+        // adb hiccup during confirmation — leave state untouched
+      }
+    }, 1500)
   }
 }
 
@@ -363,6 +402,10 @@ onBeforeUnmount(() => {
   if (devicePollTimer) {
     clearInterval(devicePollTimer)
     devicePollTimer = null
+  }
+  if (confirmTimer) {
+    clearTimeout(confirmTimer)
+    confirmTimer = null
   }
 })
 

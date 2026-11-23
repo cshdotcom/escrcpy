@@ -486,3 +486,60 @@ export function buildApiMessages(
   // attached to nothing — the next user turn will carry fresh state anyway.
   return messages
 }
+
+// ── interrupted-run repair (error isolation) ─────────────────
+
+/** Generate a message id — injected here so the function stays pure JS. */
+function fallbackMessageId(prefix: string): string {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Repair a conversation left half-finished by a crashed, aborted or
+ * power-lossed run: an assistant message whose tool_calls never received
+ * tool results makes every FOLLOW-UP request fail with a provider 400
+ * (OpenAI requires every tool_call to be answered by a tool message) — one
+ * interrupted run used to poison the whole conversation permanently.
+ *
+ * Synthesizes `[interrupted]` tool results for every unanswered tool_call so
+ * the next run starts from a clean, API-valid state. Mutates the session
+ * object's messages array in place; returns true when a repair happened
+ * (callers use it to decide whether to re-persist).
+ */
+export function sanitizeSessionMessages(session: { messages?: SessionMessage[] }): boolean {
+  const messages = Array.isArray(session?.messages) ? session.messages : []
+  const answered = new Set(
+    messages.filter(m => m?.role === 'tool' && m.tool_call_id).map(m => m.tool_call_id),
+  )
+
+  let repaired = false
+
+  // Walk from the end so inserted results land right after their assistant
+  // message even when several turns are dangling.
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls))
+      continue
+
+    const missing = message.tool_calls.filter(call => call?.id && !answered.has(call.id))
+    if (!missing.length)
+      continue
+
+    for (const call of [...missing].reverse()) {
+      messages.splice(index + 1, 0, {
+        id: fallbackMessageId('msg'),
+        role: 'tool',
+        tool_call_id: call.id,
+        name: call.function?.name || 'unknown',
+        content: JSON.stringify({ error: 'Tool execution was interrupted before a result was recorded.' }),
+        status: 'aborted',
+        createdAt: message.createdAt || new Date().toISOString(),
+      })
+      answered.add(call.id)
+    }
+
+    repaired = true
+  }
+
+  return repaired
+}

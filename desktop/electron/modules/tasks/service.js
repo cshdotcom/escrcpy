@@ -1,6 +1,8 @@
 import { ipcxMain } from '@escrcpy/electron-ipcx/main'
 import { app } from 'electron'
+import { platform } from '@electron-toolkit/utils'
 import electronStore from '$electron/helpers/store/index.js'
+import { setBootPersistence } from '$electron/services/launch/index.js'
 
 import {
   AUTOMATION_ACTIONS,
@@ -20,7 +22,7 @@ import {
   upsertTask,
   upsertWorkflow,
 } from './helpers/store.js'
-import { executeTaskById, runWorkflow } from './helpers/executor.js'
+import { executeTaskById, runWorkflow, listSessionsForPicker } from './helpers/executor.js'
 import { computeNextRunAt, previewCron } from './helpers/schedule-helper.js'
 import { isValidCron } from './helpers/cron.js'
 
@@ -53,6 +55,10 @@ function normalizeTaskPayload(payload = {}) {
   if (task.type === 'AI') {
     if (!String(task.config?.prompt || '').trim())
       throw new Error('AI prompt is required')
+
+    // sessionMode 'existing' binds the task to a user-selected conversation.
+    if (task.config?.sessionMode === 'existing' && !task.config?.sessionId)
+      throw new Error('A conversation must be selected for the "existing conversation" context mode')
   }
   else if (task.type === 'AUTOMATION') {
     if (!AUTOMATION_ACTIONS.includes(task.config?.action))
@@ -197,6 +203,16 @@ export default {
     })
 
     // ── Shared helpers ───────────────────────────────────
+    /** Conversation list for the task editor's "use existing conversation" picker. */
+    ipcxMain.handle('tasks:sessions', async () => {
+      try {
+        return ok({ sessions: listSessionsForPicker() })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_SESSIONS')
+      }
+    })
+
     ipcxMain.handle('tasks:preview-cron', async (_event, payload) => {
       try {
         const expr = String(payload?.expr || '').trim()
@@ -254,17 +270,14 @@ export default {
 
     /**
      * Register/unregister Escrcpy as a system login item so scheduled tasks
-     * fire even when the user has not opened the app after boot.
+     * fire even when the user has not opened the app after boot. Rides the
+     * launch service so Linux (.desktop autostart) and the self-healing
+     * re-assert loop behave identically to the preferences switch.
      */
     ipcxMain.handle('tasks:set-launch-on-boot', async (_event, payload) => {
       try {
         const enabled = Boolean(payload?.enabled)
-        // On macOS, --hidden starts the app minimized to the tray so the user
-        // is not interrupted by a window popping up at every login.
-        app.setLoginItemSettings({
-          openAtLogin: enabled,
-          args: [enabled ? '--hidden' : ''],
-        })
+        await setBootPersistence(enabled)
         console.log(`[Tasks] launch-on-boot ${enabled ? 'enabled' : 'disabled'}`)
         return ok({ enabled })
       }
@@ -279,6 +292,12 @@ export default {
      */
     ipcxMain.handle('tasks:get-launch-on-boot', async () => {
       try {
+        if (platform.isLinux) {
+          const AutoLaunch = (await import('auto-launch')).default
+          const autoLaunch = new AutoLaunch({ name: 'Escrcpy', isHidden: true })
+          return ok({ enabled: await autoLaunch.isEnabled().catch(() => false) })
+        }
+
         const settings = app.getLoginItemSettings()
         return ok({ enabled: settings.openAtLogin })
       }

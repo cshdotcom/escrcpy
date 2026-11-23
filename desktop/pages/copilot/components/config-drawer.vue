@@ -199,6 +199,21 @@
                 <span class="text-xs text-gray-400">{{ $t('copilot.config.retryHint') }}</span>
               </div>
               <div class="flex items-center gap-2">
+                <el-switch v-model="settings.autoReconnect" @change="persist" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.autoReconnectHint') }}</span>
+              </div>
+              <div v-if="settings.autoReconnect" class="flex items-center gap-2">
+                <span class="text-xs text-gray-400 shrink-0">{{ $t('copilot.config.reconnectMaxRetries') }}</span>
+                <el-input-number
+                  v-model="settings.reconnectMaxRetries"
+                  :min="1"
+                  :max="20"
+                  size="small"
+                  class="!w-28"
+                  @change="persist"
+                />
+              </div>
+              <div class="flex items-center gap-2">
                 <el-switch v-model="settings.allowShell" @change="persist" />
                 <span class="text-xs text-gray-400">{{ $t('copilot.config.allowShellHint') }}</span>
               </div>
@@ -210,6 +225,43 @@
                 <el-switch v-model="settings.launchOnBoot" @change="handleLaunchOnBootChange" />
                 <span class="text-xs text-gray-400">{{ $t('copilot.config.launchOnBootHint') }}</span>
               </div>
+
+              <!-- Embedded web server (网页版) -->
+              <div class="flex items-center gap-2">
+                <el-switch v-model="settings.webServer.enabled" @change="handleWebServerChange" />
+                <span class="text-xs text-gray-400">{{ $t('copilot.config.webServerHint') }}</span>
+              </div>
+              <template v-if="settings.webServer.enabled">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs text-gray-400 shrink-0">{{ $t('copilot.config.webPort') }}</span>
+                  <el-input-number
+                    v-model="settings.webServer.port"
+                    :min="1024"
+                    :max="65535"
+                    size="small"
+                    class="!w-28"
+                    @change="handleWebServerChange"
+                  />
+                  <span class="text-xs text-gray-400 shrink-0">{{ $t('copilot.config.webPassword') }}</span>
+                  <el-input
+                    v-model="settings.webServer.password"
+                    type="password"
+                    show-password
+                    size="small"
+                    class="!w-32"
+                    :placeholder="$t('copilot.config.webPasswordPlaceholder')"
+                    @change="handleWebServerChange"
+                  />
+                </div>
+                <div v-if="webStatus && webStatus.running" class="text-xs text-gray-400 break-all leading-5">
+                  <i class="i-solar-global-linear mr-1" />
+                  {{ webStatus.urls.join('  ·  ') }}
+                  <span v-if="webStatus.lanOnly" class="text-orange-400">（{{ $t('copilot.config.webLanOnlyHint') }}）</span>
+                </div>
+                <div v-else-if="webStatusChecked" class="text-xs text-orange-500">
+                  {{ $t('copilot.config.webNotRunning') }}
+                </div>
+              </template>
             </div>
           </el-form-item>
 
@@ -322,6 +374,33 @@ async function handleLaunchOnBootChange(value) {
   }
 }
 
+// ── embedded web server (网页版) ─────────────────────
+const webStatus = ref(null)
+const webStatusChecked = ref(false)
+
+async function refreshWebStatus() {
+  try {
+    const result = await window.$preload.ipcxRenderer.invoke('web:status')
+    if (result?.success) {
+      webStatus.value = result
+      webStatusChecked.value = true
+    }
+  }
+  catch {}
+}
+
+function handleWebServerChange() {
+  persist()
+  // The server module picks the change up from the store and restarts
+  // asynchronously — give it a beat before reading back the status.
+  setTimeout(refreshWebStatus, 900)
+}
+
+watch(visible, (value) => {
+  if (value)
+    refreshWebStatus()
+})
+
 const presets = VENDOR_PRESETS
 const apiTypeOptions = API_TYPE_OPTIONS
 
@@ -408,7 +487,9 @@ async function handleTestConnection() {
     if (result.success) {
       testResult.value = {
         success: true,
-        message: `${t('copilot.check.api.success', { model: vendor.model })} (${result.latency}ms)`,
+        message: result.streamingOk === false
+          ? `${t('copilot.check.api.success', { model: vendor.model })} (${result.latency}ms) — ${t('copilot.check.api.streamingBroken')}`
+          : `${t('copilot.check.api.success', { model: vendor.model })} (${result.latency}ms)`,
       }
     }
     else {

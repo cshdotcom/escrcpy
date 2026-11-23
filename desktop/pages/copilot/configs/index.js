@@ -126,6 +126,12 @@ export const DEFAULT_SETTINGS = {
   // Retry AI calls on transient failures so scheduled tasks run to completion.
   retryOnFailure: true,
   maxRetries: 3,
+  // Auto-reconnect the interactive chat on transient errors (network drop,
+  // stream timeout, 5xx, rate-limit): the turn is retried with exponential
+  // backoff and a visible "reconnecting" banner instead of dying on the
+  // first hiccup.
+  autoReconnect: true,
+  reconnectMaxRetries: 5,
   // Automatically compact the conversation when the estimated context usage
   // approaches the model budget: older turns are summarized (LLM) or trimmed,
   // so long autonomous runs keep working instead of dying on context overflow.
@@ -138,4 +144,11 @@ export const DEFAULT_SETTINGS = {
   // When a scheduled task fires and no window is visible, restore the main
   // window so the user can see what happened.
   revealWindowOnTaskFire: true,
+  // Embedded Web UI ("网页版"): chat + scheduled tasks from any browser on
+  // the LAN. Without a password the server only accepts loopback connections.
+  webServer: {
+    enabled: false,
+    port: 38080,
+    password: '',
+  },
 }

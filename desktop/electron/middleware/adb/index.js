@@ -562,6 +562,14 @@ async function getRawDeviceList() {
 let lastOfflineRecoveryAt = 0
 const OFFLINE_RECOVERY_INTERVAL_MS = 15_000
 
+// Escalation state: how many consecutive recovery rounds a device has stayed
+// offline through, and when the daemon was last restarted. `adb reconnect`
+// cannot fix a zombie adb server; after a few failed rounds we restart the
+// daemon itself (with a long cooldown so we never thrash).
+let offlineStreaks = new Map()
+let lastKillServerAt = 0
+const KILL_SERVER_COOLDOWN_MS = 5 * 60 * 1000
+
 /**
  * When adb reports a device as `offline` the connection is usually just
  * desynchronised (USB hiccup, device slept). `adb reconnect offline` asks the
@@ -571,8 +579,10 @@ const OFFLINE_RECOVERY_INTERVAL_MS = 15_000
 async function recoverOfflineDevices(devices) {
   const offline = (devices || []).filter(device => device.type === 'offline')
 
-  if (!offline.length)
+  if (!offline.length) {
+    offlineStreaks.clear()
     return false
+  }
 
   if (Date.now() - lastOfflineRecoveryAt < OFFLINE_RECOVERY_INTERVAL_MS)
     return false
@@ -586,6 +596,32 @@ async function recoverOfflineDevices(devices) {
   }
   catch (error) {
     console.warn('[ADB] reconnect offline failed:', error?.message ?? error)
+  }
+
+  // Escalation: if the same devices keep coming back offline across recovery
+  // rounds, the adb daemon itself is wedged. Restart it once (cooldown 5min);
+  // the tracker reconnect logic picks the socket back up automatically.
+  for (const device of offline) {
+    const streak = (offlineStreaks.get(device.id) || 0) + 1
+    offlineStreaks.set(device.id, streak)
+  }
+
+  const worst = Math.max(...[...offlineStreaks.values()])
+  if (worst >= 3 && Date.now() - lastKillServerAt > KILL_SERVER_COOLDOWN_MS) {
+    lastKillServerAt = Date.now()
+    offlineStreaks.clear()
+
+    console.warn('[ADB] devices stuck offline after repeated reconnects, restarting adb server')
+
+    try {
+      await shell('kill-server')
+      // adbkit reconnects lazily on the next command; give the daemon a beat
+      // before the health check's next listDevices() spins it up again.
+      await new Promise(resolve => setTimeout(resolve, 1500))
+    }
+    catch (error) {
+      console.warn('[ADB] kill-server failed:', error?.message ?? error)
+    }
   }
 
   return true

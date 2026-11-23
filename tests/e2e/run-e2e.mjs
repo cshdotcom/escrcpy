@@ -63,6 +63,40 @@ async function ctrl(base, method, api, body) {
   return res.json()
 }
 
+/** Type + send one message in a Copilot window like a user would. Tries the
+ * send button under several titles (i18n may not be loaded in this env —
+ * raw keys show up) and always falls back to an Enter keystroke. */
+async function sendInCopilot(session, text) {
+  await session.evaluate(`(() => {
+    const ta = document.querySelector('.copilot-input textarea')
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, ${JSON.stringify(text)})
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  })()`)
+  await sleep(300)
+  return session.evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')].find(b => ['发送', 'Send', 'copilot.send'].includes(b.title))
+    if (btn && !btn.disabled) { btn.click(); return 'btn' }
+    const ta = document.querySelector('.copilot-input textarea')
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }))
+    return 'enter'
+  })()`)
+}
+
+/** fetch with fresh connections + retries — immune to the web server's
+ * restart window (pooled sockets die when the listener restarts). */
+async function fetchRetry(url, options = {}, tries = 6) {
+  let lastError = null
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      return await fetch(url, { ...options, headers: { connection: 'close', ...(options.headers || {}) } })
+    }
+    catch (error) { lastError = error }
+    await sleep(400)
+  }
+  throw lastError
+}
+
 const procs = []
 function cleanupAll() {
   for (const p of procs) {
@@ -117,7 +151,41 @@ function writeBaseConfig() {
   // IMPORTANT: electron-store persists NESTED objects — the keys
   // 'copilot.settings' / 'common.adbDir' are dot-paths, not flat keys.
   const config = {
-    version: '3.7.0', // match app version so index.post.js keeps our adbDir
+    version: '3.8.0', // match app version so migrations keep our adbDir
+
+    // ── v3.8.0 scheduler probes ──
+    // A task overdue by >24h must be SKIPPED with a recorded reason; a task
+    // overdue by minutes must be caught up and run once.
+    tasks: {
+      list: [
+        {
+          id: 'task_stale_skip',
+          name: 'Stale probe (skip with reason)',
+          type: 'AI',
+          enabled: true,
+          cronExpr: '0 4 * * *',
+          notifyOnComplete: false,
+          createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+          updatedAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+          config: { action: 'ai', vendorId: 'e2e', prompt: 'stale probe', sessionMode: 'new' },
+          nextRunAt: new Date(Date.now() - 25 * 3600 * 1000).toISOString(),
+        },
+        {
+          id: 'task_catchup',
+          name: 'Catch-up probe',
+          type: 'AI',
+          enabled: true,
+          // One-shot cron (Jan 1) so the fabricated overdue occurrence fires
+          // exactly once via catch-up and never interferes with later phases.
+          cronExpr: '0 0 1 1 *',
+          notifyOnComplete: false,
+          createdAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+          updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+          config: { action: 'ai', vendorId: 'e2e', prompt: 'CATCHUP_PROBE_PROMPT', sessionMode: 'new' },
+          nextRunAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        },
+      ],
+    },
     common: {
       adbDir: path.join(__dirname, 'fake-adb-bin'),
       scrcpyDir: path.join(__dirname, 'fake-adb-bin'), // fake scrcpy keeps the dependency dialog away
@@ -228,7 +296,7 @@ async function main() {
   const noCrashDialog = !electronLogs.includes('A JavaScript error occurred')
   check('S1.4 no "A JavaScript error occurred" dialog', noCrashDialog)
 
-  const modelText = await main.evaluate(`document.body.innerText.includes('FakePhone')`)
+  const modelText = await waitFor(() => main.evaluate(`document.body.innerText.includes('FakePhone')`), { timeoutMs: 20000, intervalMs: 600, label: 'device display name' })
   check('S1.5 device display name rendered (devices-l product chain)', Boolean(modelText))
 
   // ════════ S2 · AI API config persistence (bug regression) ════════
@@ -613,8 +681,291 @@ async function main() {
   check('S6.5 Electron process alive through the whole run', Boolean(stillAlive), `exitCode=${electronProc?.exitCode}`)
   check('S6.6 no renderer crash dialog in logs', !electronLogs.includes('A JavaScript error occurred'))
 
+  // ════════ S7 · v3.8.0: scheduler reliability ════════
+  console.log('\n[S7] scheduler reliability (skip-with-reason / catch-up / concurrency)')
+
+  // Silence the per-minute probe tasks so they stop consuming mock scripts.
+  for (const taskId of [savedTask?.id, 'task_catchup'].filter(Boolean)) {
+    await main2.evaluate(`(async () => {
+      await window.$preload.ipcxRenderer.invoke('tasks:toggle', { id: ${JSON.stringify(taskId)}, enabled: false })
+      return true
+    })()`)
+  }
+  await sleep(500)
+
+  const runsAll = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:runs', { limit: 200 })
+    return JSON.stringify(r)
+  })()`)
+  let allRuns = []
+  try {
+    const parsed = JSON.parse(runsAll)
+    allRuns = parsed?.runs || parsed?.data?.runs || []
+  }
+  catch {}
+
+  const skipRun = allRuns.find(r => r.refId === 'task_stale_skip' && r.status === 'SKIPPED')
+  check('S7.1 >24h-overdue occurrence skipped WITH recorded reason', Boolean(skipRun && /overdue/i.test(String(skipRun.error || ''))), JSON.stringify(skipRun)?.slice(0, 140))
+
+  const staleRescheduled = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:list')
+    const parsed = JSON.parse(JSON.stringify(r))
+    const tasks = parsed?.tasks || parsed?.data?.tasks || []
+    return JSON.stringify(tasks.find(t => t.id === 'task_stale_skip')?.nextRunAt)
+  })()`)
+  let staleOk = false
+  try {
+    staleOk = Date.parse(JSON.parse(staleRescheduled)) > Date.now()
+  }
+  catch {}
+  check('S7.2 skipped task rescheduled to a future slot', staleOk, staleRescheduled)
+
+  const catchupRun = allRuns.find(r => r.refId === 'task_catchup' && r.status === 'SUCCESS' && (r.trigger === 'schedule' || r.source === 'schedule'))
+  check('S7.3 10min-overdue task caught up and ran (sleep/app-closed scenario)', Boolean(catchupRun), JSON.stringify(catchupRun)?.slice(0, 140))
+
+  // ════════ S8 · v3.8.0: embedded web UI ════════
+  console.log('\n[S8] embedded web UI (port + password + chat + tasks)')
+
+  const WEB_PORT = 38081
+  await main2.evaluate(`(async () => {
+    const settings = window.$preload.store.get('copilot.settings')
+    settings.webServer = { enabled: true, port: ${WEB_PORT}, password: '' }
+    window.$preload.store.set('copilot.settings', settings)
+    return true
+  })()`)
+
+  const healthz = await waitFor(async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${WEB_PORT}/healthz`)
+      return res.ok ? await res.json() : null
+    }
+    catch { return null }
+  }, { timeoutMs: 15000, intervalMs: 500, label: 'web server healthz' })
+  check('S8.1 web server starts from settings (healthz responds)', Boolean(healthz?.ok))
+
+  const page = await fetch(`http://127.0.0.1:${WEB_PORT}/`).then(r => r.text())
+  check('S8.2 web page served (contains app shell + login flow)', page.includes('Escrcpy') && page.includes('api/login'))
+
+  const webStatusIpc = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('web:status')
+    return JSON.stringify(r)
+  })()`)
+  let webStatusOk = false
+  try {
+    const parsed = JSON.parse(webStatusIpc)
+    webStatusOk = parsed?.running === true && (parsed?.urls || []).some(u => String(u).includes(`127.0.0.1:${WEB_PORT}`))
+  }
+  catch {}
+  check('S8.3 web:status IPC reports running + reachable URL', webStatusOk, webStatusIpc.slice(0, 160))
+
+  // web chat, JSON mode, against the same mock LLM the desktop uses
+  await ctrl(LLM_CTRL, 'POST', '/reset')
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [{ text: 'WEB_CHAT_OK_ANSWER' }] })
+  const chatJson = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'hello from web', stream: false, name: 'web e2e' }),
+  }).then(r => r.json())
+  const webSessionId = chatJson?.sessionId || ''
+  check('S8.4 web chat JSON round-trip (same engine as desktop)', Boolean(chatJson?.success && String(chatJson?.output || '').includes('WEB_CHAT_OK_ANSWER') && webSessionId), JSON.stringify(chatJson)?.slice(0, 140))
+
+  // web chat, SSE streaming mode
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [{ text: 'WEB_SSE_STREAM_DONE' }] })
+  const sseRes = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: webSessionId, content: 'stream please', stream: true }),
+  })
+  const sseText = await sseRes.text()
+  const sseFrames = sseText.split('\n\n').filter(f => f.startsWith('data:')).map(f => JSON.parse(f.slice(5)))
+  const sawDelta = sseFrames.some(e => e.type === 'text-delta')
+  const sawDone = sseFrames.some(e => e.type === 'done' && String(e.output || '').includes('WEB_SSE_STREAM_DONE'))
+  check('S8.5 web chat SSE streaming (text-delta frames + done)', sawDelta && sawDone, `${sseFrames.length} frames`)
+
+  // web exposes tasks and can run them
+  const webTasks = await fetch(`http://127.0.0.1:${WEB_PORT}/api/tasks`).then(r => r.json())
+  const webTaskList = webTasks?.tasks || []
+  check('S8.6 web task list matches app tasks', webTaskList.length >= 2 && webTaskList.every(t => !t.config?.vendorSnapshot), `${webTaskList.length} tasks (vendorSnapshot stripped: ${webTaskList.every(t => !t.config?.vendorSnapshot)})`)
+
+  // password auth: flip password → server restarts bound to 0.0.0.0 with auth
+  await main2.evaluate(`(async () => {
+    const settings = window.$preload.store.get('copilot.settings')
+    settings.webServer.password = 'e2e-secret'
+    window.$preload.store.set('copilot.settings', settings)
+    return true
+  })()`)
+
+  await waitFor(async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${WEB_PORT}/api/status`)
+      return res.status === 401
+    }
+    catch { return false }
+  }, { timeoutMs: 15000, intervalMs: 600, label: 'web auth enforcement' })
+  check('S8.7 password protects /api (401 without session)', true)
+
+  const badLogin = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'wrong' }),
+  }).then(r => r.status)
+  const goodLogin = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'e2e-secret' }),
+  })
+  const setCookie = goodLogin.headers.get('set-cookie') || ''
+  const cookieToken = /escrcpy_web=([^;]+)/.exec(setCookie)?.[1] || ''
+  const authedStatus = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/status`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.status)
+  check('S8.8 login flow works (wrong pw 401 → right pw sets cookie → 200)',
+    badLogin === 401 && Boolean(cookieToken) && authedStatus === 200,
+    `wrong=${badLogin} authed=${authedStatus} token=${cookieToken ? 'ok' : 'MISSING'}`)
+
+  // ════════ S9 · v3.8.0: task context modes (existing / shared) ════════
+  console.log('\n[S9] task context modes (pick existing / shared one-context)')
+
+  await ctrl(LLM_CTRL, 'POST', '/reset')
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [
+    { text: 'EXISTING_MODE_DONE' },
+    { text: 'SHARED_TASK_A_DONE' },
+    { text: 'SHARED_TASK_B_DONE' },
+  ] })
+
+  // 'existing': bind a task to the web-created conversation and run it
+  const saveExisting = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:save', { task: {
+      name: 'Existing-context task', type: 'AI', enabled: false, cronExpr: '0 5 * * *',
+      config: { action: 'ai', vendorId: 'e2e', prompt: 'continue in existing session', sessionMode: 'existing', sessionId: ${JSON.stringify(webSessionId)} },
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let existingTaskId = ''
+  try { existingTaskId = JSON.parse(saveExisting)?.task?.id || '' }
+  catch {}
+  check('S9.1 sessionMode=existing task saves with picked conversation', Boolean(existingTaskId), saveExisting.slice(0, 120))
+
+  const existingRun = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:run', { id: ${JSON.stringify(existingTaskId)} })
+    return JSON.stringify(r)
+  })()`)
+  let existingRunOk = false
+  try { existingRunOk = String(JSON.parse(existingRun)?.run?.output || '').includes('EXISTING_MODE_DONE') }
+  catch {}
+  check('S9.2 existing-context run completes', existingRunOk, existingRun.slice(0, 120))
+
+  const webSessionAfter = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/sessions/${webSessionId}`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.json())
+  const existingMsgCount = (webSessionAfter?.session?.messages || []).length
+  check('S9.3 existing-context run appended to the SAME conversation', existingMsgCount >= 5, `${existingMsgCount} messages in web session`)
+
+  // 'shared': two tasks sharing ONE global conversation
+  const saveShared = await main2.evaluate(`(async () => {
+    const mk = name => window.$preload.ipcxRenderer.invoke('tasks:save', { task: {
+      name, type: 'AI', enabled: false, cronExpr: '0 5 * * *',
+      config: { action: 'ai', vendorId: 'e2e', prompt: name + ' prompt', sessionMode: 'shared' },
+    } })
+    const a = await mk('Shared task A')
+    const b = await mk('Shared task B')
+    return JSON.stringify({ a: JSON.parse(JSON.stringify(a))?.task?.id, b: JSON.parse(JSON.stringify(b))?.task?.id })
+  })()`)
+  let sharedIds = { a: '', b: '' }
+  try { sharedIds = JSON.parse(saveShared) }
+  catch {}
+  check('S9.4 two shared-context tasks saved', Boolean(sharedIds.a && sharedIds.b), saveShared.slice(0, 120))
+
+  await main2.evaluate(`(async () => {
+    await window.$preload.ipcxRenderer.invoke('tasks:run', { id: ${JSON.stringify(sharedIds.a)} })
+    await window.$preload.ipcxRenderer.invoke('tasks:run', { id: ${JSON.stringify(sharedIds.b)} })
+    return true
+  })()`)
+
+  const sharedSession = (readStore()?.copilot?.sessions || []).find(s => s.id === 'session_shared_tasks')
+  const sharedMsgCount = (sharedSession?.messages || []).length
+  const sharedSawBoth = JSON.stringify(sharedSession?.messages || []).includes('SHARED_TASK_A_DONE') && JSON.stringify(sharedSession?.messages || []).includes('SHARED_TASK_B_DONE')
+  check('S9.5 all shared tasks reason inside ONE conversation', Boolean(sharedSession) && sharedSawBoth && sharedMsgCount >= 4, `messages=${sharedMsgCount} sawBoth=${sharedSawBoth}`)
+
+  // ════════ S10 · v3.8.0: error isolation + auto-reconnect ════════
+  console.log('\n[S10] error isolation (dangling tool_calls) + renderer auto-reconnect')
+
+  // Inject a half-finished agent turn (assistant tool_calls without results)
+  // into the web conversation — the next chat must repair it instead of
+  // failing with a provider 400 forever.
+  await main2.evaluate(`(async () => {
+    const sessions = window.$preload.store.get('copilot.sessions') || []
+    const s = sessions.find(x => x.id === ${JSON.stringify(webSessionId)})
+    if (s) {
+      s.messages.push({ id: 'dangling_assistant', role: 'assistant', content: 'let me check', tool_calls: [{ id: 'call_dangling_1', type: 'function', function: { name: 'get_device_info', arguments: '{}' } }], createdAt: new Date().toISOString() })
+      window.$preload.store.set('copilot.sessions', sessions)
+    }
+    return true
+  })()`)
+
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [{ text: 'REPAIRED_AFTER_DANGLING' }] })
+  const repairedChat = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json', cookie: `escrcpy_web=${cookieToken}` },
+    body: JSON.stringify({ sessionId: webSessionId, content: 'continue after crash', stream: false }),
+  }).then(r => r.json())
+  const repairedSession = (readStore()?.copilot?.sessions || []).find(s => s.id === webSessionId)
+  const syntheticTool = (repairedSession?.messages || []).find(m => m.role === 'tool' && m.tool_call_id === 'call_dangling_1')
+  check('S10.1 dangling tool_calls repaired (synthetic result injected)', Boolean(repairedChat?.success && syntheticTool), `synthetic=${Boolean(syntheticTool)} out=${String(repairedChat?.output || '').slice(0, 60)}`)
+
+  // Renderer auto-reconnect: two transient 500s, then success — the chat
+  // must recover on its own and show the reconnect banner meanwhile.
+  await ctrl(LLM_CTRL, 'POST', '/reset')
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [
+    { error: { status: 500, message: 'mock transient failure 1' } },
+    { error: { status: 500, message: 'mock transient failure 2' } },
+    { text: 'RECONNECT_RECOVERED_ANSWER' },
+  ] })
+
+  const requestsBeforeReconnect = (await ctrl(LLM_CTRL, 'GET', '/stats')).stats.requests
+
+  await sendInCopilot(copilot2, '触发一次瞬态错误')
+
+  let sawReconnectBanner = false
+  const reconnectAnswer = await (async () => {
+    const deadline = Date.now() + 45000
+    while (Date.now() < deadline) {
+      // sample both conditions on each poll
+      // eslint-disable-next-line no-await-in-loop
+      const banner = await copilot2.evaluate(`document.body.innerText.includes('正在自动重连') || document.body.innerText.includes('auto reconnecting') || document.body.innerText.includes('copilot.reconnect.banner')`)
+      if (banner)
+        sawReconnectBanner = true
+      // eslint-disable-next-line no-await-in-loop
+      const done = await copilot2.evaluate(`document.body.innerText.includes('RECONNECT_RECOVERED_ANSWER')`)
+      if (done)
+        return true
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(300)
+    }
+    return false
+  })()
+  check('S10.2 renderer auto-reconnect recovers after transient 500s', Boolean(reconnectAnswer))
+  check('S10.3 reconnect banner visible during retries', sawReconnectBanner)
+
+  const requestsAfterReconnect = (await ctrl(LLM_CTRL, 'GET', '/stats')).stats.requests
+  check('S10.4 provider actually saw the retries (3 requests for one turn)', requestsAfterReconnect - requestsBeforeReconnect >= 3, `delta=${requestsAfterReconnect - requestsBeforeReconnect}`)
+
+  // Error isolation: a hard-failed turn must not poison the next one.
+  await ctrl(LLM_CTRL, 'POST', '/reset')
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [
+    { error: { status: 500, message: 'fail 1' } },
+    { error: { status: 500, message: 'fail 2' } },
+    { error: { status: 500, message: 'fail 3' } },
+    { error: { status: 500, message: 'fail 4' } },
+    { error: { status: 500, message: 'fail 5' } },
+    { error: { status: 500, message: 'fail 6' } },
+    { error: { status: 500, message: 'fail 7' } },
+  ] })
+
+  await sendInCopilot(copilot2, '这轮会失败')
+
+  await waitFor(() => copilot2.evaluate(`/(auto-reconnected 5 times|\u91cd\u8fde 5 \u6b21|copilot\.reconnect\.exhausted)/.test(document.body.innerText)`), { timeoutMs: 60000, intervalMs: 800, label: 'exhausted error banner' })
+  check('S10.5 persistent failures surface a clear error after retries exhausted', true)
+
+  // next turn must succeed cleanly (no error inertia)
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [{ text: 'NEXT_TURN_CLEAN_ANSWER' }] })
+  await sendInCopilot(copilot2, '下一轮正常')
+  const nextTurnClean = await waitFor(() => copilot2.evaluate(`document.body.innerText.includes('NEXT_TURN_CLEAN_ANSWER')`), { timeoutMs: 30000, intervalMs: 600, label: 'clean next turn' })
+  check('S10.6 next turn succeeds after a hard failure (error isolation)', Boolean(nextTurnClean))
+
   // teardown
-  main.close(); main2.close(); copilot.close()
+  main.close(); main2.close(); copilot.close(); copilot2.close()
   console.log(`\n== ${results.filter(r => r.ok).length}/${results.length} checks passed ==`)
   cleanupAll()
   process.exit(results.every(r => r.ok) ? 0 : 1)

@@ -49,6 +49,7 @@ import {
   mainModule,
   tasksModule,
   terminalModule,
+  webModule,
 } from './modules/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -88,6 +89,7 @@ mainApp.use(copilotModule)
 mainApp.use(explorerModule)
 mainApp.use(tasksModule)
 mainApp.use(terminalModule)
+mainApp.use(webModule)
 
 app.whenReady().then(() => {
   mainApp.start()

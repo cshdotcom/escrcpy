@@ -1,5 +1,5 @@
 import { buildToolSchemas, DEFAULT_SETTINGS, isDangerousShell, KEY_EVENTS, VENDOR_PRESETS } from '../configs/index.js'
-import { buildApiMessages, compactSessionContext, estimateTokens } from '@escrcpy/shared'
+import { buildApiMessages, compactSessionContext, estimateTokens, sanitizeSessionMessages } from '@escrcpy/shared'
 
 const { t } = useI18n()
 
@@ -67,6 +67,11 @@ export function useCopilot() {
   const streamingSteps = ref(0)
   const stepLimitReached = ref(false)
   const lastError = ref(null)
+
+  // Auto-reconnect state for the visible banner ("reconnecting 2/5…")
+  const isReconnecting = ref(false)
+  const reconnectAttempt = ref(0)
+  const reconnectMax = ref(0)
 
   // Pending tool confirmation (human in the loop)
   const pendingConfirm = ref(null)
@@ -303,6 +308,37 @@ export function useCopilot() {
     return window.$preload.ipcxRenderer.invoke('copilot:test-connection', { config })
   }
 
+  // ── auto-reconnect ──────────────────────────────────────────
+  // Transient provider failures (network drop, stream timeout, 5xx,
+  // rate-limit) should not kill a chat turn: retry the SAME turn with
+  // exponential backoff and a visible status instead of surfacing an error.
+  const TRANSIENT_ERROR_CODES = new Set([
+    'NETWORK_ERROR',
+    'SERVER_ERROR',
+    'RATE_LIMITED',
+    'STREAM_TIMEOUT',
+    'TIMEOUT',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ECONNREFUSED',
+    'EAI_AGAIN',
+    'UNKNOWN_ERROR',
+  ])
+
+  function isTransientError(error) {
+    const code = error?.code || ''
+    if (TRANSIENT_ERROR_CODES.has(code))
+      return true
+    // Network-level failures arrive as TypeError from fetch with no code.
+    if (!code && error?.message && /network|fetch|socket|stream|timeout/i.test(error.message))
+      return true
+    return false
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
+
   // ── tool execution ──────────────────────────────────────────
   function requestToolConfirm(toolCall) {
     if (!settings.requireConfirm || allowAllThisSession.value)
@@ -536,8 +572,14 @@ export function useCopilot() {
     if (!content || isStreaming.value)
       return
 
+    // Error isolation: every new turn starts from a clean slate — stale
+    // error banners, reconnect progress and half-finished tool sequences
+    // from a previous failed turn never leak into this one.
     lastError.value = null
     stepLimitReached.value = false
+    isReconnecting.value = false
+    reconnectAttempt.value = 0
+    sanitizeSessionMessages(session)
 
     if (!isConfigured.value) {
       lastError.value = t('copilot.error.configIncomplete')
@@ -591,10 +633,48 @@ export function useCopilot() {
         streamingText.value = ''
 
         const contextMessages = buildContextMessages(session)
-        const result = await requestChat(contextMessages, tools, (event) => {
-          if (event.type === 'text-delta')
-            streamingText.value += event.text
-        })
+
+        // One chat round with auto-reconnect: transient failures (network,
+        // timeout, 5xx, rate-limit) retry the same round with backoff while
+        // a visible banner shows the reconnect progress. User aborts and
+        // config/auth errors are never retried.
+        const maxReconnect = settings.autoReconnect !== false ? (Number(settings.reconnectMaxRetries) || 5) : 0
+        reconnectMax.value = maxReconnect
+
+        let result = null
+        let attempt = 0
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          // fresh buffer each attempt — a retried turn regenerates from the
+          // persisted context, partial text of the failed attempt is dropped
+          result = await requestChat(contextMessages, tools, (event) => {
+            if (event.type === 'text-delta')
+              streamingText.value += event.text
+          })
+
+          if (result.success)
+            break
+
+          const transient = isTransientError(result.error) && result.error?.code !== 'ABORTED'
+          if (!transient || currentRequestAborted || attempt >= maxReconnect)
+            break
+
+          attempt++
+          reconnectAttempt.value = attempt
+          isReconnecting.value = true
+
+          const backoff = Math.min(1200 * 2 ** (attempt - 1), 15000)
+          await sleep(backoff)
+
+          // the user may have hit stop while we were waiting
+          if (currentRequestAborted)
+            break
+
+          streamingText.value = ''
+        }
+
+        isReconnecting.value = false
+        reconnectAttempt.value = 0
 
         if (!result.success) {
           if (result.error?.code === 'ABORTED') {
@@ -608,6 +688,11 @@ export function useCopilot() {
               })
             }
             lastError.value = t('copilot.stopped')
+          }
+          else if (isTransientError(result.error) && maxReconnect > 0) {
+            const guidance = result.error?.code ? t(`copilot.error.guidance.${result.error.code}`) : ''
+            const base = guidance && !guidance.startsWith('copilot.') ? guidance : (result.error?.message || t('copilot.error.executionFailed'))
+            lastError.value = `${base}（${t('copilot.reconnect.exhausted', { attempts: maxReconnect })}）`
           }
           else {
             const guidance = result.error?.code ? t(`copilot.error.guidance.${result.error.code}`) : ''
@@ -749,6 +834,9 @@ export function useCopilot() {
     streamingSteps,
     stepLimitReached,
     lastError,
+    isReconnecting,
+    reconnectAttempt,
+    reconnectMax,
     pendingConfirm,
     contextUsage,
 

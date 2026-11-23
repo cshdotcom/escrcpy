@@ -79,9 +79,14 @@ export function createDefaultConfig(type = 'AI') {
       includeDeviceInfo: false,
       includeScreenshot: false,
       vendorSnapshot: null,
-      // 'new'    — every run starts a fresh context
-      // 'continue' — every run continues the task's own persistent conversation
+      // Context (conversation) policy for task runs:
+      //  'new'      — every run starts a fresh context
+      //  'continue' — every run continues the task's own persistent conversation
+      //  'existing' — every run continues a user-selected conversation (sessionId)
+      //  'shared'   — all tasks in 'shared' mode reason inside ONE conversation
       sessionMode: 'new',
+      // Used only by sessionMode 'existing': the picked conversation id.
+      sessionId: '',
       // When true the task runs as a full device agent: the model gets the
       // Copilot tool set (tap/swipe/key/shell/screenshot/…) and operates the
       // device autonomously, with unlimited steps by default.

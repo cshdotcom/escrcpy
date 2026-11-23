@@ -14,7 +14,7 @@ Runs the real app (built `desktop/` bundle) under Xvfb against:
   round-trips, conversation continuity).
 - **run-e2e.mjs** — boots everything + Electron (`--remote-debugging-port`),
   drives the UI through CDP the way a user would (typing, buttons, windows,
-  IPC) and asserts 33 checks across boot, config persistence, Copilot tool
+  IPC) and asserts 55 checks across boot, config persistence, Copilot tool
   loops + vision, context auto-compaction, scheduled agent tasks (session
   continuity, unlimited steps) and phantom-offline self-healing.
 
