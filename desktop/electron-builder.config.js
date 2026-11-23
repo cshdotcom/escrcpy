@@ -40,7 +40,7 @@ export default {
   publish: {
     provider: 'github',
     owner: 'cshdotcom',
-    repo: 'escrcpy',
+    repo: 'escrcpy-Next',
     updaterCacheDirName: 'escrcpy-updater',
   },
 

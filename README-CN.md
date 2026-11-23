@@ -7,13 +7,13 @@
 
 # Escrcpy
 
-[![GitCode](https://gitcode.com/viarotel-org/escrcpy/star/badge.svg)](https://gitcode.com/viarotel-org/escrcpy)
-[![Gitee](https://gitee.com/viarotel-org/escrcpy/badge/star.svg?theme=dark)](https://gitee.com/viarotel-org/escrcpy)
-[![GitHub](https://img.shields.io/github/stars/viarotel-org/escrcpy?label=Github%20Stars)](https://github.com/viarotel-org/escrcpy)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/viarotel-org/escrcpy)
-[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/viarotel-org/escrcpy)
+[![GitCode](https://gitcode.com/cshdotcom/escrcpy-Next/star/badge.svg)](https://gitcode.com/cshdotcom/escrcpy-Next)
+[![Gitee](https://gitee.com/cshdotcom/escrcpy-Next/badge/star.svg?theme=dark)](https://gitee.com/cshdotcom/escrcpy-Next)
+[![GitHub](https://img.shields.io/github/stars/cshdotcom/escrcpy-Next?label=Github%20Stars)](https://github.com/cshdotcom/escrcpy-Next)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cshdotcom/escrcpy-Next)
+[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/cshdotcom/escrcpy-Next)
 
-📱 使用图形化的 Scrcpy 显示和控制您的 Android 设备[English Document](https://github.com/viarotel-org/escrcpy/blob/main/README.md)
+📱 使用图形化的 Scrcpy 显示和控制您的 Android 设备[English Document](https://github.com/cshdotcom/escrcpy-Next/blob/main/README.md)
 
 <div style="display:flex;">
   <img src="https://cdn.jsdelivr.net/gh/viarotel/resources@latest/screenshots/escrcpy/zh-CN/overview.png?version=3.0.8" alt="viarotel-escrcpy" width="100%">
@@ -38,7 +38,7 @@
 
 ### 通过发布的软件包手动安装
 
-查看 [发布地址](https://github.com/viarotel-org/escrcpy/releases)
+查看 [发布地址](https://github.com/cshdotcom/escrcpy-Next/releases)
 
 ### macOS 可以通过 Homebrew 安装
 
@@ -54,14 +54,14 @@
 
 ## 开发人员
 
-如果你是开发人员，希望运行或帮助改进该项目请参阅 [开发文档](https://github.com/viarotel-org/escrcpy/blob/main/develop.md)
+如果你是开发人员，希望运行或帮助改进该项目请参阅 [开发文档](https://github.com/cshdotcom/escrcpy-Next/blob/main/develop.md)
 
 ## 获得帮助
 
 因为是开源项目 全靠爱发电 所以支持有限 更新节奏不固定
 
 - [常见问题](https://viarotel.eu.org/zhHans/help/escrcpy)
-- [反馈问题](https://github.com/viarotel-org/escrcpy/issues)
+- [反馈问题](https://github.com/cshdotcom/escrcpy-Next/issues)
 - [联系邮箱](mailto:viarotel@qq.com)
 
 ## 下一步做什么？
