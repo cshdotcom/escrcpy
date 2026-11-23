@@ -128,6 +128,46 @@
             </div>
           </el-scrollbar>
 
+          <!-- Conversation function toolbar (对话内功能栏) -->
+          <div class="flex-none flex items-center gap-2 flex-wrap px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/80">
+            <el-select
+              v-model="sessionDeviceIds"
+              size="small"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              class="!w-64"
+              :placeholder="$t('copilot.toolbar.devices')"
+              @change="handleSessionDevicesChange"
+            >
+              <el-option
+                v-for="device in deviceOptions"
+                :key="device.id"
+                :value="device.id"
+                :label="device.label"
+                :disabled="!isDeviceUsable(device)"
+              />
+            </el-select>
+
+            <el-tag v-if="sessionDeviceIds.length > 1" size="small" type="warning" class="!m-0">
+              <i class="i-solar-devices-linear mr-1" />
+              {{ $t('copilot.toolbar.groupMode', { count: sessionDeviceIds.length }) }}
+            </el-tag>
+
+            <span class="flex-1" />
+
+            <el-tooltip :content="$t('copilot.toolbar.screenshot')" placement="top">
+              <el-button size="small" text icon="Camera" :disabled="isStreaming" @click="handleQuickScreenshot" />
+            </el-tooltip>
+
+            <el-tooltip :content="$t('copilot.toolbar.groupControl')" placement="top">
+              <el-button size="small" text @click="openGroupControl">
+                <i class="i-solar-devices-bold" />
+              </el-button>
+            </el-tooltip>
+          </div>
+
           <!-- Input area -->
           <div class="flex-none border-t border-gray-200 dark:border-gray-700 p-2.5 bg-gray-50/50 dark:bg-gray-900/50">
             <div class="flex items-end gap-2">
@@ -265,10 +305,18 @@ const { locale, size, themeStore } = useWindowStateSync({
     await refreshDevices()
 
     const payloadDevice = window.$preload.payload?.device?.id || query.device?.id
-    currentDeviceId.value = payloadDevice || deviceOptions.value.find(d => isDeviceUsable(d))?.id || deviceOptions.value[0]?.id || ''
+    // Group control opens this window with a multi-device payload (群控 AI):
+    // seed the conversation with the whole device set.
+    const payloadDeviceIds = Array.isArray(window.$preload.payload?.deviceIds)
+      ? window.$preload.payload.deviceIds.filter(Boolean)
+      : []
+    currentDeviceId.value = payloadDeviceIds[0] || payloadDevice || deviceOptions.value.find(d => isDeviceUsable(d))?.id || deviceOptions.value[0]?.id || ''
 
-    if (!activeSession.value)
+    if (!activeSession.value) {
       copilot.createSession(currentDeviceId.value)
+      if (payloadDeviceIds.length > 1)
+        copilot.updateSessionDevices(activeSession.value?.id || '', payloadDeviceIds)
+    }
   },
 })
 
@@ -332,7 +380,48 @@ async function handleSend(preset) {
 
   inputText.value = ''
   scrollToBottom()
-  await copilot.send(text, currentDeviceId.value)
+  const deviceArg = sessionDeviceIds.value.length ? [...sessionDeviceIds.value] : currentDeviceId.value
+  await copilot.send(text, deviceArg)
+}
+
+// ── conversation function toolbar (对话内功能栏) ────
+const sessionDeviceIds = computed({
+  get() {
+    const ids = activeSession.value?.deviceIds
+    if (Array.isArray(ids) && ids.length)
+      return ids
+    return activeSession.value?.deviceId ? [activeSession.value.deviceId] : []
+  },
+  set(value) {
+    if (activeSession.value)
+      copilot.updateSessionDevices(activeSession.value.id, value)
+  },
+})
+
+function handleSessionDevicesChange(value) {
+  sessionDeviceIds.value = value
+  if (!value.length)
+    ElMessage.warning(t('copilot.toolbar.needDevice'))
+}
+
+async function handleQuickScreenshot() {
+  const target = sessionDeviceIds.value[0] || currentDeviceId.value
+  if (!target)
+    return
+  try {
+    await window.$preload.adb.screencap(target, { returnBase64: false })
+    ElMessage.success(t('copilot.toolbar.screenshotDone'))
+  }
+  catch (error) {
+    ElMessage.error(error?.message ?? 'screenshot failed')
+  }
+}
+
+function openGroupControl() {
+  window.$preload.win.open('pages/group-control', {
+    title: 'groupControl.title',
+    type: 'group',
+  })
 }
 
 async function handleStop() {

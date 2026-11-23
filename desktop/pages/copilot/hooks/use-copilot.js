@@ -281,6 +281,17 @@ export function useCopilot() {
     })
   }
 
+  /** Bind a conversation to one or many devices (群控 AI). */
+  function updateSessionDevices(sessionId, deviceIds) {
+    const session = allSessions.value.find(item => item.id === sessionId)
+    if (!session)
+      return
+    const ids = (Array.isArray(deviceIds) ? deviceIds : [deviceIds]).filter(Boolean)
+    session.deviceIds = ids
+    session.deviceId = ids[0] || session.deviceId
+    touchSession(session)
+  }
+
   async function stopStreaming() {
     currentRequestAborted = true
     if (currentRequestId.value) {
@@ -369,9 +380,20 @@ export function useCopilot() {
 
   async function executeTool(name, args, context) {
     const adb = window.$preload.adb
-    const deviceId = context.deviceId
+    // Per-call device targeting (multi-device conversations) + broadcast fan-out.
+    const deviceId = args?.deviceId || context.deviceId
+    const deviceIds = Array.isArray(context.deviceIds) && context.deviceIds.length
+      ? context.deviceIds
+      : (deviceId ? [deviceId] : [])
 
-    if (!deviceId && name !== 'list_devices')
+    const runOnAll = async (fn) => {
+      const results = {}
+      for (const id of deviceIds)
+        results[id] = await fn(id).catch(error => ({ error: error?.message ?? String(error) }))
+      return JSON.stringify(results)
+    }
+
+    if (!deviceId && name !== 'list_devices' && !name.startsWith('broadcast_'))
       throw new Error(t('copilot.noDevice'))
 
     switch (name) {
@@ -422,6 +444,43 @@ export function useCopilot() {
         await adb.input.tap(deviceId, Math.round(args.x), Math.round(args.y))
         await capturePostActionContext(context, deviceId)
         return JSON.stringify({ success: true, action: 'tap', x: args.x, y: args.y })
+      }
+
+      case 'broadcast_tap': {
+        const output = await runOnAll(async (id) => {
+          await adb.input.tap(id, Math.round(args.x), Math.round(args.y))
+          return { success: true }
+        })
+        await capturePostActionContext(context, deviceIds[0])
+        return output
+      }
+
+      case 'broadcast_input_text': {
+        const output = await runOnAll(async (id) => {
+          await adb.input.text(id, String(args.text ?? ''))
+          return { success: true }
+        })
+        await capturePostActionContext(context, deviceIds[0])
+        return output
+      }
+
+      case 'broadcast_key': {
+        const keyCode = KEY_EVENTS[String(args.key).toLowerCase()]
+        if (!keyCode)
+          throw new Error(`Unknown key: ${args.key}`)
+        const output = await runOnAll(async (id) => {
+          await adb.input.key(id, keyCode)
+          return { success: true }
+        })
+        await capturePostActionContext(context, deviceIds[0])
+        return output
+      }
+
+      case 'broadcast_screenshot': {
+        return runOnAll(async (id) => {
+          const base64 = await adb.screencap(id, { returnBase64: true })
+          return { captured: true, bytes: base64.length }
+        })
       }
 
       case 'swipe': {
@@ -566,11 +625,20 @@ export function useCopilot() {
   }
 
   // ── send / agent loop ───────────────────────────────────────
-  async function send(text, deviceId) {
-    const session = ensureSession(deviceId)
+  async function send(text, deviceIdOrIds) {
+    const session = ensureSession(Array.isArray(deviceIdOrIds) ? deviceIdOrIds[0] : deviceIdOrIds)
     const content = String(text || '').trim()
     if (!content || isStreaming.value)
       return
+
+    // Multi-device binding (群控): accept one device or many.
+    const boundIds = (Array.isArray(deviceIdOrIds) ? deviceIdOrIds : [deviceIdOrIds]).filter(Boolean)
+    if (boundIds.length) {
+      session.deviceIds = boundIds
+      session.deviceId = boundIds[0]
+    }
+    const sessionDeviceIds = session.deviceIds?.length ? session.deviceIds : (session.deviceId ? [session.deviceId] : [])
+    const multiDevice = sessionDeviceIds.length > 1
 
     // Error isolation: every new turn starts from a clean slate — stale
     // error banners, reconnect progress and half-finished tool sequences
@@ -586,7 +654,7 @@ export function useCopilot() {
       return
     }
 
-    session.deviceId = deviceId || session.deviceId
+    session.deviceId = sessionDeviceIds[0] || session.deviceId
     session.messages.push({
       id: uid('msg'),
       role: 'user',
@@ -606,8 +674,8 @@ export function useCopilot() {
     // 0 (or negative) means unlimited — run until the model stops calling tools.
     const rawMax = Number(settings.maxSteps)
     const maxSteps = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 0
-    const tools = buildToolSchemas({ allowShell: settings.allowShell })
-    const context = { deviceId: session.deviceId, lastScreenshot: null, lastUiLayout: null }
+    const tools = buildToolSchemas({ allowShell: settings.allowShell, multiDevice })
+    const context = { deviceId: sessionDeviceIds[0] || '', deviceIds: sessionDeviceIds, lastScreenshot: null, lastUiLayout: null }
 
     try {
       let continueLoop = true
@@ -854,6 +922,7 @@ export function useCopilot() {
     persistSettings,
 
     send,
+    updateSessionDevices,
     stopStreaming,
     fetchModels,
     testConnection,

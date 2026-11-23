@@ -32,6 +32,7 @@ import { chatWithProvider } from '../../copilot/helpers/providers.js'
 
 import { addRun, findTask, findWorkflow, patchTask, uid, updateRun } from './store.js'
 import { computeNextRunAt } from './schedule-helper.js'
+import { matchOnDevice } from './image-match.js'
 
 export { isDangerousShell }
 
@@ -39,7 +40,7 @@ export { isDangerousShell }
 let adbxInstance = null
 let adbxFailed = false
 
-function getAdbx() {
+export function getAdbx() {
   if (adbxInstance)
     return adbxInstance
 
@@ -88,9 +89,59 @@ function truncate(text, max = 20_000) {
 }
 
 // ── Automation actions ───────────────────────────────────
+/**
+ * Smart-recognition precondition (官方“智能识别”的等价实现): when a step
+ * carries `imageMatch`, the target screen is matched against a template
+ * first. `followMatchPoint` re-targets tap coordinates to the matched
+ * location; an unmatched screen fails (or skips) the step.
+ */
+async function applyImageMatch(config) {
+  const match = config.imageMatch
+  if (!match?.enabled || !match.templatePath)
+    return
+
+  const adbx = getAdbx()
+  const result = await matchOnDevice(adbx, config.deviceId, match.templatePath, {
+    threshold: Number(match.threshold) || 0.8,
+  })
+
+  if (!result.matched) {
+    if (match.optional === true)
+      return 'skip'
+    throw new Error(`Image match failed: best score ${result.score} < threshold ${match.threshold ?? 0.8}`)
+  }
+
+  if (match.followMatchPoint) {
+    config.x = result.x + Math.floor(result.width / 2)
+    config.y = result.y + Math.floor(result.height / 2)
+  }
+
+  return { score: result.score, x: result.x, y: result.y }
+}
+
+/** Run one action across one or many devices (群控执行): when `deviceIds`
+ * is set the action runs on every listed device and outputs are joined. */
 export async function runAction(action, context = {}) {
-  const config = action || {}
+  const config = { ...(action || {}) }
   const kind = config.action || config.kind
+
+  // Multi-device broadcast: same action on every device.
+  const targets = Array.isArray(config.deviceIds) && config.deviceIds.length
+    ? config.deviceIds
+    : null
+  if (targets) {
+    const outputs = []
+    for (const deviceId of targets) {
+      const single = await runAction({ ...config, deviceId, deviceIds: undefined })
+      outputs.push(`[${deviceId}] ${single.output}`)
+    }
+    return { output: outputs.join('\n'), broadcast: true }
+  }
+
+  // Smart recognition precondition on any single-device action.
+  const matchInfo = await applyImageMatch(config)
+  if (matchInfo === 'skip')
+    return { output: `image match not found (optional) — step skipped` }
 
   switch (kind) {
     case 'shell': {
@@ -190,6 +241,48 @@ export async function runAction(action, context = {}) {
     case 'notify': {
       showNotification(String(config.title || 'Escrcpy'), String(config.content || ''))
       return { output: `notification: ${config.title || ''}` }
+    }
+
+    case 'wait_image': {
+      await ensureDevice(config.deviceId)
+      const templatePath = String(config.templatePath || '').trim()
+      if (!templatePath)
+        throw new Error('wait_image requires a template image')
+
+      const threshold = Number(config.threshold) || 0.8
+      const timeoutMs = Math.max(1000, Math.min(600_000, Number(config.timeoutMs) || 60_000))
+      const intervalMs = Math.max(500, Math.min(10_000, Number(config.intervalMs) || 2000))
+      const adbx = getAdbx()
+      const startedAt = Date.now()
+
+      let last = null
+      while (Date.now() - startedAt < timeoutMs) {
+        last = await matchOnDevice(adbx, config.deviceId, templatePath, { threshold })
+        if (last.matched)
+          return {
+            output: `image appeared after ${Date.now() - startedAt}ms (score ${last.score} @ ${last.x},${last.y})`,
+            match: last,
+          }
+        await new Promise(resolve => setTimeout(resolve, intervalMs))
+      }
+      throw new Error(`wait_image timed out after ${timeoutMs}ms (best score ${last?.score ?? '?'})`)
+    }
+
+    case 'match_image': {
+      await ensureDevice(config.deviceId)
+      const templatePath = String(config.templatePath || '').trim()
+      if (!templatePath)
+        throw new Error('match_image requires a template image')
+
+      const result = await matchOnDevice(getAdbx(), config.deviceId, templatePath, {
+        threshold: Number(config.threshold) || 0.8,
+      })
+      if (!result.matched && config.required !== false)
+        throw new Error(`Image not found: score ${result.score} < ${(config.threshold ?? 0.8)}`)
+      return {
+        output: `match ${result.matched ? 'FOUND' : 'NOT FOUND'} (score ${result.score} @ ${result.x},${result.y} ${result.width}x${result.height})`,
+        match: result,
+      }
     }
 
     default:
@@ -475,10 +568,22 @@ async function buildDeviceContext(config) {
  */
 async function executeAgentTool(name, args, context, settings) {
   const adbx = getAdbx()
-  const deviceId = context.deviceId
+  // Multi-device: the model may target a specific device per call; broadcast
+  // tools fan out to every device in the conversation.
+  const deviceId = args?.deviceId || context.deviceId
+  const deviceIds = Array.isArray(context.deviceIds) && context.deviceIds.length
+    ? context.deviceIds
+    : (deviceId ? [deviceId] : [])
 
-  if (!deviceId && name !== 'list_devices')
+  if (!deviceId && name !== 'list_devices' && !name.startsWith('broadcast_'))
     throw new Error('No device selected for this task')
+
+  const runOnAll = async (fn) => {
+    const results = {}
+    for (const id of deviceIds)
+      results[id] = await fn(id).catch(error => ({ error: error?.message ?? String(error) }))
+    return JSON.stringify(results)
+  }
 
   const capturePostActionContext = async () => {
     const tasks = []
@@ -550,6 +655,44 @@ async function executeAgentTool(name, args, context, settings) {
       await adbx.input.tap(deviceId, Math.round(args.x), Math.round(args.y))
       await capturePostActionContext()
       return JSON.stringify({ success: true, action: 'tap', x: args.x, y: args.y })
+    }
+
+    case 'broadcast_tap': {
+      const output = await runOnAll(async (id) => {
+        await adbx.input.tap(id, Math.round(args.x), Math.round(args.y))
+        return { success: true }
+      })
+      await capturePostActionContext()
+      return output
+    }
+
+    case 'broadcast_input_text': {
+      const output = await runOnAll(async (id) => {
+        await adbx.input.text(id, String(args.text ?? ''))
+        return { success: true }
+      })
+      await capturePostActionContext()
+      return output
+    }
+
+    case 'broadcast_key': {
+      const keyCode = AI_KEY_EVENTS[String(args.key).toLowerCase()]
+      if (!keyCode)
+        throw new Error(`Unknown key: ${args.key}`)
+      const output = await runOnAll(async (id) => {
+        await adbx.input.key(id, keyCode)
+        return { success: true }
+      })
+      await capturePostActionContext()
+      return output
+    }
+
+    case 'broadcast_screenshot': {
+      const output = await runOnAll(async (id) => {
+        const base64 = await adbx.screenshot.captureBase64(id)
+        return { captured: true, bytes: base64.length }
+      })
+      return output
     }
 
     case 'swipe': {
@@ -638,10 +781,15 @@ async function agentRound(vendorConfig, messages, tools, onEvent, signal) {
  */
 async function runAiAgentLoop({ vendorConfig, settings, session, config, promptText, onEvent, signal }) {
   const adbxSettings = settings
-  const tools = buildAiToolSchemas({ allowShell: adbxSettings.allowShell !== false })
+  const deviceIds = Array.isArray(config.deviceIds) && config.deviceIds.length
+    ? config.deviceIds.filter(Boolean)
+    : (config.deviceId ? [config.deviceId] : [])
+  const multiDevice = deviceIds.length > 1
+  const tools = buildAiToolSchemas({ allowShell: adbxSettings.allowShell !== false, multiDevice })
 
   const context = {
-    deviceId: config.deviceId,
+    deviceId: deviceIds[0] || '',
+    deviceIds,
     vision: vendorConfig.vision === true,
     lastScreenshot: null,
     lastUiLayout: null,
@@ -771,7 +919,10 @@ export async function runAiPrompt(config = {}, task = null) {
 
   // ── agent mode: full autonomous device control ──────────────
   if (config.agentMode === true) {
-    if (!config.deviceId)
+    const deviceIds = Array.isArray(config.deviceIds) && config.deviceIds.length
+      ? config.deviceIds.filter(Boolean)
+      : (config.deviceId ? [config.deviceId] : [])
+    if (!deviceIds.length)
       throw new Error('Agent tasks need a target device')
 
     // Session policy: 'new' | 'continue' | 'existing' | 'shared' (see
@@ -788,7 +939,7 @@ export async function runAiPrompt(config = {}, task = null) {
     const promptText = context.note ? `${prompt}\n\n${context.note}` : prompt
 
     try {
-      const result = await runAiAgentLoop({ vendorConfig, settings, session, config, promptText })
+      const result = await runAiAgentLoop({ vendorConfig, settings, session, config: { ...config, deviceIds }, promptText })
       return { ...result, sessionId: useSession ? session.id : null }
     }
     finally {
@@ -908,6 +1059,7 @@ export async function runWebChat(options = {}) {
     content,
     agentMode = false,
     deviceId = '',
+    deviceIds = [],
     vendorId = '',
     name = '',
     onEvent,
@@ -953,8 +1105,20 @@ export async function runWebChat(options = {}) {
     created = true
   }
 
-  if (deviceId)
+  // Multi-device binding (群控): a conversation may control several devices
+  // at once — agent tools accept per-call targets + broadcast tools fan out.
+  const boundDeviceIds = (Array.isArray(deviceIds) && deviceIds.length ? deviceIds : (deviceId ? [deviceId] : []))
+    .map(String)
+    .filter(Boolean)
+
+  if (boundDeviceIds.length) {
+    session.deviceIds = boundDeviceIds
+    session.deviceId = boundDeviceIds[0]
+  }
+  else if (deviceId) {
     session.deviceId = deviceId
+    delete session.deviceIds
+  }
 
   // Error isolation: repair tool_calls left unanswered by an interrupted
   // previous turn before appending to the conversation.
@@ -989,14 +1153,14 @@ export async function runWebChat(options = {}) {
 
     let result
     if (agentMode) {
-      if (!session.deviceId)
+      if (!session.deviceId && !session.deviceIds?.length)
         throw new Error('Agent mode needs a target device')
 
       result = await runAiAgentLoop({
         vendorConfig,
         settings,
         session,
-        config: { deviceId: session.deviceId },
+        config: { deviceId: session.deviceId, deviceIds: session.deviceIds || (session.deviceId ? [session.deviceId] : []) },
         promptText: text,
         onEvent,
         signal: controller.signal,

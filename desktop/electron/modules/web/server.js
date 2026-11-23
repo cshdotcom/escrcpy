@@ -276,6 +276,7 @@ async function handleChat(req, res) {
     content = '',
     agentMode = false,
     deviceId = '',
+    deviceIds = [],
     vendorId = '',
     name = '',
     stream = true,
@@ -288,7 +289,7 @@ async function handleChat(req, res) {
 
   if (!wantsSse) {
     try {
-      const result = await runWebChat({ sessionId, content, agentMode, deviceId, vendorId, name })
+      const result = await runWebChat({ sessionId, content, agentMode, deviceId, deviceIds, vendorId, name })
       return sendJson(res, 200, { success: true, ...result })
     }
     catch (error) {
@@ -326,6 +327,7 @@ async function handleChat(req, res) {
       content,
       agentMode,
       deviceId,
+      deviceIds,
       vendorId,
       name,
       onStart: (id) => {

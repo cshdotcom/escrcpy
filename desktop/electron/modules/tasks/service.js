@@ -22,7 +22,8 @@ import {
   upsertTask,
   upsertWorkflow,
 } from './helpers/store.js'
-import { executeTaskById, runWorkflow, listSessionsForPicker } from './helpers/executor.js'
+import { executeTaskById, runWorkflow, listSessionsForPicker, getAdbx } from './helpers/executor.js'
+import { listTemplates, matchOnDevice, saveTemplate } from './helpers/image-match.js'
 import { computeNextRunAt, previewCron } from './helpers/schedule-helper.js'
 import { isValidCron } from './helpers/cron.js'
 
@@ -213,6 +214,39 @@ export default {
       }
     })
 
+    // ── image-match templates (智能识别) ────────────────
+    ipcxMain.handle('tasks:save-template', async (_event, payload) => {
+      try {
+        const filePath = saveTemplate(payload?.name, payload?.imageBase64)
+        return ok({ path: filePath })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_SAVE_TEMPLATE')
+      }
+    })
+
+    ipcxMain.handle('tasks:list-templates', async () => {
+      try {
+        return ok({ templates: listTemplates() })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_LIST_TEMPLATES')
+      }
+    })
+
+    ipcxMain.handle('tasks:test-match', async (_event, payload) => {
+      try {
+        const { deviceId, templatePath, threshold } = payload || {}
+        if (!deviceId || !templatePath)
+          throw new Error('deviceId and templatePath are required')
+        const match = await matchOnDevice(getAdbx(), deviceId, templatePath, { threshold: Number(threshold) || 0.8 })
+        return ok({ match })
+      }
+      catch (error) {
+        return fail(error, 'TASKS_TEST_MATCH')
+      }
+    })
+
     ipcxMain.handle('tasks:preview-cron', async (_event, payload) => {
       try {
         const expr = String(payload?.expr || '').trim()
@@ -340,6 +374,10 @@ export default {
         'tasks:runs',
         'tasks:clear-runs',
         'tasks:stats',
+        'tasks:sessions',
+        'tasks:save-template',
+        'tasks:list-templates',
+        'tasks:test-match',
         'tasks:set-launch-on-boot',
         'tasks:get-launch-on-boot',
         'workflows:list',

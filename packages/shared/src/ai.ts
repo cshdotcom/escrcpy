@@ -104,15 +104,20 @@ export const AI_DEFAULT_SYSTEM_PROMPT = [
 ].join('\n')
 
 /** Tool schemas in OpenAI function-calling format. */
-export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiToolSchema[] {
-  const { allowShell = true } = options
+export function buildAiToolSchemas(options: { allowShell?: boolean, multiDevice?: boolean } = {}): AiToolSchema[] {
+  const { allowShell = true, multiDevice = false } = options
+  // In multi-device conversations every device tool gains an optional
+  // deviceId parameter so the model can pick WHICH device to act on.
+  const deviceIdParam = multiDevice
+    ? { deviceId: { type: 'string', description: 'Target device id. Omit to use the primary (first) device of this conversation.' } }
+    : {}
   const tools: AiToolSchema[] = [
     {
       type: 'function',
       function: {
         name: 'get_device_info',
         description: 'Get connected Android device info: model, brand, Android version, screen size, battery level and the current focused app.',
-        parameters: { type: 'object', properties: {} },
+        parameters: { type: 'object', properties: { ...deviceIdParam } },
       },
     },
     {
@@ -120,7 +125,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
       function: {
         name: 'screenshot',
         description: 'Capture the current device screen. The image is attached to the conversation when the model supports vision; otherwise only the image size is reported. After every mutating action (tap, swipe, key, input_text, open_app, shell) the system also auto-attaches a fresh screenshot and UI dump, so you usually do NOT need to call this manually right after an action.',
-        parameters: { type: 'object', properties: {} },
+        parameters: { type: 'object', properties: { ...deviceIdParam } },
       },
     },
     {
@@ -128,7 +133,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
       function: {
         name: 'get_ui_layout',
         description: 'Dump the current screen UI hierarchy as XML. Use it to locate clickable elements and their bounds when you cannot see the screen.',
-        parameters: { type: 'object', properties: {} },
+        parameters: { type: 'object', properties: { ...deviceIdParam } },
       },
     },
     {
@@ -141,6 +146,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
           properties: {
             x: { type: 'number', description: 'X coordinate in pixels' },
             y: { type: 'number', description: 'Y coordinate in pixels' },
+            ...deviceIdParam,
           },
           required: ['x', 'y'],
         },
@@ -159,6 +165,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
             x2: { type: 'number', description: 'End X' },
             y2: { type: 'number', description: 'End Y' },
             duration: { type: 'number', description: 'Duration in milliseconds, default 300' },
+            ...deviceIdParam,
           },
           required: ['x1', 'y1', 'x2', 'y2'],
         },
@@ -173,6 +180,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
           type: 'object',
           properties: {
             text: { type: 'string', description: 'Text to type' },
+            ...deviceIdParam,
           },
           required: ['text'],
         },
@@ -187,6 +195,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
           type: 'object',
           properties: {
             key: { type: 'string', description: 'One of: home, back, menu, power, volume_up, volume_down, volume_mute, enter, del, tab, app_switch, notification, camera, media_play_pause, media_next, media_previous' },
+            ...deviceIdParam,
           },
           required: ['key'],
         },
@@ -201,6 +210,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
           type: 'object',
           properties: {
             package: { type: 'string', description: 'Android package name' },
+            ...deviceIdParam,
           },
           required: ['package'],
         },
@@ -216,6 +226,60 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
     },
   ]
 
+  // Group control (群控): fan-out tools that run on EVERY device bound to
+  // this conversation. Only exposed in multi-device mode.
+  if (multiDevice) {
+    tools.push(
+      {
+        type: 'function',
+        function: {
+          name: 'broadcast_tap',
+          description: 'Tap the same coordinates on ALL devices in this conversation simultaneously (group control).',
+          parameters: {
+            type: 'object',
+            properties: {
+              x: { type: 'number', description: 'X coordinate in pixels' },
+              y: { type: 'number', description: 'Y coordinate in pixels' },
+            },
+            required: ['x', 'y'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'broadcast_input_text',
+          description: 'Type the same text on ALL devices in this conversation simultaneously (group control).',
+          parameters: {
+            type: 'object',
+            properties: { text: { type: 'string', description: 'Text to type' } },
+            required: ['text'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'broadcast_key',
+          description: 'Press the same key on ALL devices in this conversation simultaneously (group control).',
+          parameters: {
+            type: 'object',
+            properties: { key: { type: 'string', description: 'Key name, same as the key tool' } },
+            required: ['key'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'broadcast_screenshot',
+          description: 'Capture screenshots from ALL devices in this conversation simultaneously. Returns per-device results.',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+    )
+  }
+
   if (allowShell) {
     tools.push({
       type: 'function',
@@ -226,6 +290,7 @@ export function buildAiToolSchemas(options: { allowShell?: boolean } = {}): AiTo
           type: 'object',
           properties: {
             command: { type: 'string', description: 'The shell command to execute' },
+            ...deviceIdParam,
           },
           required: ['command'],
         },

@@ -1,6 +1,22 @@
 # Changelog
 
-## [3.8.0](https://github.com/cshdotcom/escrcpy/compare/v3.7.0...v3.8.0) (2026-11-22)
+## [3.9.0](https://github.com/cshdotcom/escrcpy-Next/compare/v3.8.0...v3.9.0) (2026-11-23)
+
+本版本对齐官方付费版（EscrcpyX）核心能力：群控、AI 多设备、智能识别全部免费内置。
+
+### Features
+
+* ✨ **群控（Group Control）**：新增群控窗口——多选设备后一键广播点击/滑动/文字/按键到所有设备，批量截图、批量安装 APK，实时执行日志；设备页新增"群控"入口
+* ✨ **AI 群控（多设备对话）**：一个对话可绑定多台设备——工具支持按设备定向（模型自选目标），并新增 broadcast_tap / broadcast_input_text / broadcast_key / broadcast_screenshot 广播工具；不同对话可绑不同设备组合；自动任务同样支持多设备（deviceIds 群控广播执行）
+* ✨ **对话内功能栏**：Copilot 输入区上方新增工具栏——设备多选绑定、群控模式徽标、快捷截图、群控窗口直达
+* ✨ **智能识别（图像匹配）**：基于 OpenCV.js（TM_CCOEFF_NORMED）+ sharp 的模板匹配——任意自动化步骤可附加 imageMatch 前置条件（模板/阈值/点击跟随匹配点/未匹配跳过）；新增 match_image（识别判断）与 wait_image（等待图像出现，超时/间隔可配）动作；模板管理（上传保存/列表/即时测试）与官方 automation-templates 目录兼容
+* ✨ 网页版同步支持多设备：设备多选（群控）+ AI 广播工具
+
+### Bug Fixes
+
+* 修复 Copilot 发送函数遗留旧参数名导致的发送中断（ReferenceError）
+
+ [3.8.0](https://github.com/cshdotcom/escrcpy/compare/v3.7.0...v3.8.0) (2026-11-22)
 
 本版本聚焦可靠性（定时任务绝不无故失败、AI 出错自动恢复）与网页版：手机浏览器即可使用大部分功能。
 

@@ -12,7 +12,7 @@ const KEY_RUNS = 'tasks.runs'
 const MAX_RUNS = 500
 
 export const TASK_TYPES = ['AI', 'AUTOMATION', 'WORKFLOW']
-export const AUTOMATION_ACTIONS = ['shell', 'tap', 'swipe', 'key', 'input_text', 'open_app', 'screenshot', 'http', 'notify']
+export const AUTOMATION_ACTIONS = ['shell', 'tap', 'swipe', 'key', 'input_text', 'open_app', 'screenshot', 'http', 'notify', 'match_image', 'wait_image']
 export const WORKFLOW_STEP_TYPES = ['ai', 'action', 'delay']
 
 export function uid(prefix = 'id') {

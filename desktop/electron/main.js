@@ -50,6 +50,7 @@ import {
   tasksModule,
   terminalModule,
   webModule,
+  groupControlModule,
 } from './modules/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -90,6 +91,7 @@ mainApp.use(explorerModule)
 mainApp.use(tasksModule)
 mainApp.use(terminalModule)
 mainApp.use(webModule)
+mainApp.use(groupControlModule)
 
 app.whenReady().then(() => {
   mainApp.start()

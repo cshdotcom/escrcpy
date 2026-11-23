@@ -22,6 +22,8 @@ export const AUTOMATION_ACTIONS = [
   { value: 'screenshot', label: 'tasks.action.screenshot', needsDevice: true },
   { value: 'http', label: 'tasks.action.http', needsDevice: false },
   { value: 'notify', label: 'tasks.action.notify', needsDevice: false },
+  { value: 'match_image', label: 'tasks.actions.match_image', needsDevice: true },
+  { value: 'wait_image', label: 'tasks.actions.wait_image', needsDevice: true },
 ]
 
 export const DEVICE_ACTIONS = AUTOMATION_ACTIONS.filter(action => action.needsDevice).map(action => action.value)

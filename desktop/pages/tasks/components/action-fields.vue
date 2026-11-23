@@ -1,15 +1,24 @@
 <template>
   <div class="flex flex-col gap-2.5">
-    <el-form-item v-if="needsDevice" :label="$t('tasks.fields.device')">
-      <el-select v-model="config.deviceId" class="!w-full" :placeholder="$t('tasks.fields.devicePlaceholder')" filterable>
-        <el-option
-          v-for="device in devices"
-          :key="device.id"
-          :value="device.id"
-          :label="device.label"
-          :disabled="!isDeviceUsable(device)"
-        />
-      </el-select>
+    <el-form-item v-if="needsDevice" :label="$t('tasks.fields.deviceIds')">
+      <div class="flex flex-col gap-1.5 w-full">
+        <el-select
+          :model-value="deviceSelection"
+          class="!w-full"
+          multiple collapse-tags collapse-tags-tooltip filterable
+          :placeholder="$t('tasks.fields.devicePlaceholder')"
+          @update:model-value="handleDeviceSelection"
+        >
+          <el-option
+            v-for="device in devices"
+            :key="device.id"
+            :value="device.id"
+            :label="device.label"
+            :disabled="!isDeviceUsable(device)"
+          />
+        </el-select>
+        <span class="text-xs text-gray-400">{{ $t('tasks.fields.deviceIdsHint') }}</span>
+      </div>
     </el-form-item>
 
     <!-- shell -->
@@ -162,6 +171,88 @@ function isDeviceUsable(device) {
 function openPicker(mode) {
   pickerMode.value = mode
   pickerVisible.value = true
+}
+
+const matchTesting = ref(false)
+
+const deviceSelection = computed(() => {
+  if (Array.isArray(props.config.deviceIds) && props.config.deviceIds.length)
+    return [...props.config.deviceIds]
+  return props.config.deviceId ? [props.config.deviceId] : []
+})
+
+/** Multi-select keeps a single-device task single (deviceId) and switches to
+ * broadcast (deviceIds) the moment more than one device is selected. */
+function handleDeviceSelection(value) {
+  const ids = [...(value || [])]
+  if (ids.length <= 1) {
+    props.config.deviceId = ids[0] || ''
+    props.config.deviceIds = []
+  }
+  else {
+    props.config.deviceIds = ids
+    props.config.deviceId = ids[0]
+  }
+}
+
+function toggleImageMatch(value) {
+  if (value)
+    props.config.imageMatch = { enabled: true, templatePath: '', threshold: 0.8, followMatchPoint: false, optional: false }
+  else
+    props.config.imageMatch = null
+}
+
+function pickTemplateFile(target) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file)
+      return
+    const base64 = await new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.readAsDataURL(file)
+    })
+    const name = (file.name || 'template').replace(/\.\w+$/, '')
+    const result = await window.$preload.ipcxRenderer.invoke('tasks:save-template', { name, imageBase64: base64 })
+    if (result?.success) {
+      if (target)
+        target.templatePath = result.path
+      else
+        props.config.templatePath = result.path
+      ElMessage.success(result.path)
+    }
+    else {
+      ElMessage.error(result?.error?.message || 'save failed')
+    }
+  }
+  input.click()
+}
+
+async function testMatch() {
+  const deviceId = props.config.deviceIds?.[0] || props.config.deviceId
+  const templatePath = props.config.templatePath || props.config.imageMatch?.templatePath
+  if (!deviceId || !templatePath) {
+    ElMessage.warning('device + template required')
+    return
+  }
+  matchTesting.value = true
+  try {
+    const result = await window.$preload.ipcxRenderer.invoke('tasks:test-match', {
+      deviceId,
+      templatePath,
+      threshold: props.config.threshold ?? props.config.imageMatch?.threshold,
+    })
+    if (result?.success)
+      ElMessage.success(`${result.match.matched ? 'MATCH' : 'NO MATCH'} · score ${result.match.score} @ ${result.match.x},${result.match.y}`)
+    else
+      ElMessage.error(result?.error?.message || 'match failed')
+  }
+  finally {
+    matchTesting.value = false
+  }
 }
 
 function handlePickerConfirm(coords) {

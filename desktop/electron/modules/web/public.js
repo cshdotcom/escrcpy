@@ -164,7 +164,7 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
       <div class="chat-col">
         <div class="chat-toolbar">
           <label class="switch" id="agent-switch"><span class="track"></span>智能体模式（可操作设备）</label>
-          <select id="device-select" title="目标设备"><option value="">选择设备…</option></select>
+          <select id="device-select" title="目标设备可多选（群控）" multiple size="1" style="min-width:150px"><option value="">选择设备…</option></select>
           <select id="vendor-select" title="AI 模型"></select>
         </div>
         <div id="messages"><div class="empty">开始一段新对话，或从左侧选择已有会话</div></div>
@@ -282,12 +282,12 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
       $('chip-devices').innerHTML = '设备 <b>' + online + '/' + state.devices.length + '</b>';
 
       var sel = $('device-select');
-      var prev = sel.value;
-      sel.innerHTML = '<option value="">选择设备…</option>' + state.devices.map(function (d) {
+      var prev = Array.from(sel.selectedOptions || []).map(function (o) { return o.value; });
+      sel.innerHTML = state.devices.map(function (d) {
         var status = d.status === 'device' ? '在线' : d.status;
         return '<option value="' + esc(d.id) + '">' + esc(d.id) + '（' + status + '）</option>';
       }).join('');
-      if (prev) sel.value = prev;
+      Array.prototype.forEach.call(sel.options, function (o) { o.selected = prev.indexOf(o.value) !== -1; });
 
       var vsel = $('vendor-select');
       var vprev = vsel.value || state.vendorId;
@@ -442,7 +442,7 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
         sessionId: state.sessionId,
         content: text,
         agentMode: state.agentMode,
-        deviceId: $('device-select').value || '',
+        deviceIds: Array.from($('device-select').selectedOptions || []).map(function (o) { return o.value; }).filter(Boolean),
         vendorId: state.vendorId || '',
         name: text.slice(0, 24),
         stream: true,

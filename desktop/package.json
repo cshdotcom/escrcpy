@@ -1,7 +1,7 @@
 {
   "name": "escrcpy",
   "type": "module",
-  "version": "3.8.0",
+  "version": "3.9.0",
   "private": true,
   "packageManager": "pnpm@12.21.0",
   "description": "Scrcpy Powered by Electron",
@@ -18,7 +18,8 @@
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.3",
     "i18next-fs-backend": "2.6.1",
-    "sharp": "*"
+    "sharp": "*",
+    "@techstark/opencv-js": "5.0.0-release.1"
   },
   "devDependencies": {
     "@devicefarmer/adbkit": "*",

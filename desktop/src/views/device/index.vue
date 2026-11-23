@@ -141,6 +141,16 @@
         <WirelessGroup ref="wirelessGroupRef" v-bind="{ handleRefresh }" @auto-connected="onAutoConnected" />
       </div>
 
+      <!-- Group control (群控): broadcast input + multi-device AI -->
+      <div class="flex-none ml-2">
+        <el-tooltip :content="$t('groupControl.title')" placement="top">
+          <el-button size="small" @click="openGroupControl">
+            <i class="i-solar-devices-bold-duotone mr-1" />
+            {{ $t('groupControl.entry') }}
+          </el-button>
+        </el-tooltip>
+      </div>
+
       <div class="flex-1 w-0 gap-2 flex items-center justify-end">
         <el-button
           type="default"
@@ -379,6 +389,14 @@ function toggleRowExpansion(...args) {
 
 function handleConnect(...args) {
   wirelessGroupRef.value.connect(...args)
+}
+
+/** Open the group control window (群控). */
+function openGroupControl() {
+  window.$preload.win.open('pages/group-control', {
+    title: 'groupControl.title',
+    type: 'group',
+  })
 }
 
 async function handleRefresh() {

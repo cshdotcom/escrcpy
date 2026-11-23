@@ -964,6 +964,96 @@ async function main() {
   const nextTurnClean = await waitFor(() => copilot2.evaluate(`document.body.innerText.includes('NEXT_TURN_CLEAN_ANSWER')`), { timeoutMs: 30000, intervalMs: 600, label: 'clean next turn' })
   check('S10.6 next turn succeeds after a hard failure (error isolation)', Boolean(nextTurnClean))
 
+  // ════════ S11 · v3.9.0: group control + smart recognition + multi-device AI ════════
+  console.log('\n[S11] group control (群控) + image recognition (智能识别) + multi-device AI')
+
+  // a second fake device for group control
+  await ctrl(ADB_CTRL, 'POST', '/add', { serial: 'E2ETEST002' })
+  await sleep(1200)
+
+  const groupDevices = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('group:devices')
+    return JSON.stringify(r)
+  })()`)
+  let groupDeviceCount = 0
+  try {
+    groupDeviceCount = (JSON.parse(groupDevices)?.devices || []).length
+  }
+  catch {}
+  check('S11.1 group:devices lists both fake devices', groupDeviceCount >= 2, groupDevices.slice(0, 140))
+
+  // broadcast tap to both devices through the group IPC
+  const broadcastRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('group:broadcast', {
+      deviceIds: ['E2ETEST001', 'E2ETEST002'],
+      action: { action: 'tap', x: 111, y: 222 },
+    })
+    return JSON.stringify(r)
+  })()`)
+  let broadcastOk = false
+  try {
+    broadcastOk = JSON.parse(broadcastRes)?.success === true
+  }
+  catch {}
+  check('S11.2 group:broadcast taps every selected device', broadcastOk, broadcastRes.slice(0, 140))
+
+  const { calls: postBroadcastCalls } = await ctrl(ADB_CTRL, 'GET', '/calls')
+  const tappedDevices = new Set(postBroadcastCalls.filter(c => c.command.includes('input tap') || c.command.includes('-touch')).map(c => c.serial))
+  check('S11.3 broadcast reached BOTH devices (per-device input tap)', tappedDevices.has('E2ETEST001') && tappedDevices.has('E2ETEST002'), [...tappedDevices].join(','))
+
+  // smart recognition: capture a screenshot via a task, then match it as a template
+  const shotSave = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:save', { task: {
+      name: 'S11 screenshot probe', type: 'AUTOMATION', enabled: false, cronExpr: '0 5 * * *',
+      config: { action: 'screenshot', deviceId: 'E2ETEST001' },
+    } })
+    const saved = JSON.parse(JSON.stringify(r))
+    const run = await window.$preload.ipcxRenderer.invoke('tasks:run', { id: saved?.task?.id })
+    return JSON.stringify(run)
+  })()`)
+  let templatePath = ''
+  try {
+    templatePath = String(JSON.parse(shotSave)?.run?.output || '').replace('screenshot saved: ', '')
+  }
+  catch {}
+  check('S11.4 screenshot probe produced a template file', Boolean(templatePath), templatePath)
+
+  const matchSave = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('tasks:save', { task: {
+      name: 'S11 match probe', type: 'AUTOMATION', enabled: false, cronExpr: '0 5 * * *',
+      config: { action: 'match_image', deviceId: 'E2ETEST001', templatePath: ${JSON.stringify('${TEMPLATE}')}, threshold: 0.9 },
+    } })
+    const saved = JSON.parse(JSON.stringify(r))
+    const run = await window.$preload.ipcxRenderer.invoke('tasks:run', { id: saved?.task?.id })
+    return JSON.stringify(run)
+  })()`.replace('${TEMPLATE}', templatePath))
+  let matchOk = false
+  let matchDetail = matchSave
+  try {
+    const run = JSON.parse(matchSave)?.run
+    matchOk = run?.status === 'SUCCESS' && String(run?.output || '').includes('FOUND')
+    matchDetail = `status=${run?.status} output=${String(run?.output || '').slice(0, 100)}`
+  }
+  catch {}
+  check('S11.5 match_image recognizes the identical template (opencv TM_CCOEFF_NORMED)', matchOk, matchDetail)
+
+  // multi-device AI: one web conversation controlling BOTH devices (broadcast tool)
+  await ctrl(LLM_CTRL, 'POST', '/reset')
+  await ctrl(LLM_CTRL, 'POST', '/script', { steps: [
+    { tool: { name: 'broadcast_tap', arguments: { x: 77, y: 88 } } },
+    { text: 'MULTI_DEVICE_AI_DONE' },
+  ] })
+  const multiChat = await fetchRetry(`http://127.0.0.1:${WEB_PORT}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: `escrcpy_web=${cookieToken}` },
+    body: JSON.stringify({ content: 'tap on all my devices', agentMode: true, deviceIds: ['E2ETEST001', 'E2ETEST002'], stream: false, name: 'multi-device e2e' }),
+  }).then(r => r.json())
+  check('S11.6 multi-device AI conversation completes (broadcast tool round)', Boolean(multiChat?.success && String(multiChat?.output || '').includes('MULTI_DEVICE_AI_DONE')), JSON.stringify(multiChat)?.slice(0, 140))
+
+  const { calls: postAiCalls } = await ctrl(ADB_CTRL, 'GET', '/calls')
+  const aiTapped = new Set(postAiCalls.filter(c => (c.command.includes('input tap') || c.command.includes('-touch')) && c.command.includes('77')).map(c => c.serial))
+  check('S11.7 AI broadcast_tap reached BOTH devices in one conversation', aiTapped.has('E2ETEST001') && aiTapped.has('E2ETEST002'), [...aiTapped].join(','))
+
   // teardown
   main.close(); main2.close(); copilot.close(); copilot2.close()
   console.log(`\n== ${results.filter(r => r.ok).length}/${results.length} checks passed ==`)
