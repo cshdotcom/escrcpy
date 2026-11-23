@@ -239,6 +239,9 @@ importers:
       i18next-fs-backend:
         specifier: 2.6.1
         version: 2.6.1
+      konva:
+        specifier: 10.11.0
+        version: 10.11.0
       sharp:
         specifier: 0.34.5
         version: 0.34.5
@@ -4243,6 +4246,20 @@ packages:
   kind-of@6.0.3:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
     engines: {node: '>=0.10.0'}
+
+  konva@10.11.0:
+    resolution: {integrity: sha512-3Te24Caj6WC0S1YWkhzuU0EnupYm+QTKQ1YDIG396eVUPVVNfhrqmZ+8WHtct8Eb2FKAIqOQSd1Z9bm5s7aMyw==}
+    peerDependencies:
+      '@napi-rs/canvas': ^1.1.0
+      canvas: ^3.0.0
+      skia-canvas: ^3.0.0 || ^4.0.0
+    peerDependenciesMeta:
+      '@napi-rs/canvas':
+        optional: true
+      canvas:
+        optional: true
+      skia-canvas:
+        optional: true
 
   lazy-val@1.0.5:
     resolution: {integrity: sha512-0/BnGCCfyUMkBpeDgWihanIAF9JmZhHBgUhEqzvf+adhNGLoP6TaiI5oF8oyb3I45P+PcnrqihSf01M0l0G5+Q==}
@@ -9793,6 +9810,8 @@ snapshots:
       json-buffer: 3.0.1
 
   kind-of@6.0.3: {}
+
+  konva@10.11.0: {}
 
   lazy-val@1.0.5: {}
 

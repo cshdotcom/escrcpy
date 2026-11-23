@@ -30,6 +30,7 @@ import {
 } from '../tasks/helpers/executor.js'
 import { getTasks, patchTask, queryRuns } from '../tasks/helpers/store.js'
 import { computeNextRunAt } from '../tasks/helpers/schedule-helper.js'
+import mirrorModule from '../mirror/service.js'
 
 import { WEB_PAGE_HTML } from './public.js'
 
@@ -351,6 +352,70 @@ async function handleChat(req, res) {
   }
 }
 
+/**
+ * SSE stream of the embedded mirror: raw packets (base64) + lifecycle events.
+ * The browser decodes with WebCodecs, exactly like the desktop mirror window.
+ */
+function handleMirrorStream(req, res, url) {
+  const deviceId = String(url.searchParams.get('deviceId') || '').trim()
+  if (!deviceId) {
+    sendJson(res, 400, { success: false, error: 'Missing deviceId' })
+    return
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  res.write(': connected\n\n')
+
+  let closed = false
+  const unsubscribe = mirrorModule.subscribe(deviceId, (event) => {
+    if (closed)
+      return
+    try {
+      const payload = { ...event }
+      if (payload.data && typeof payload.data !== 'string') {
+        const buffer = Buffer.isBuffer(payload.data) ? payload.data : Buffer.from(payload.data)
+        payload.data = buffer.toString('base64')
+      }
+      res.write(`data: ${JSON.stringify(payload)}\n\n`)
+    }
+    catch {
+      closed = true
+      try {
+        res.end()
+      }
+      catch {}
+    }
+  })
+
+  const ping = setInterval(() => {
+    if (closed)
+      return
+    try {
+      res.write(': ping\n\n')
+    }
+    catch {
+      closed = true
+    }
+  }, 15000)
+  ping.unref?.()
+
+  req.on('close', () => {
+    closed = true
+    clearInterval(ping)
+    unsubscribe()
+  })
+  res.on('error', () => {
+    closed = true
+    clearInterval(ping)
+    unsubscribe()
+  })
+}
+
 async function route(req, res) {
   const url = new URL(req.url, 'http://localhost')
   const path = url.pathname
@@ -470,6 +535,74 @@ async function route(req, res) {
       const enabled = body?.enabled !== false
       const updated = patchTask(id, { enabled, nextRunAt: enabled ? computeNextRunAt(task) : null })
       return sendJson(res, 200, { success: true, task: serializeTaskForWeb(updated) })
+    }
+
+    if (method === 'GET' && path === '/api/mirror/status') {
+      return sendJson(res, 200, {
+        success: true,
+        sessions: mirrorModule.listSessions(),
+      })
+    }
+
+    if (method === 'GET' && path === '/api/mirror/stream')
+      return handleMirrorStream(req, res, url)
+
+    if (method === 'POST' && path === '/api/mirror/start') {
+      const body = await readBody(req)
+      const result = await mirrorModule.startSession(String(body?.deviceId || ''), {
+        maxSize: 720,
+        maxFps: 30,
+        audio: false,
+        ...(body?.options || {}),
+      })
+      return sendJson(res, 200, { success: true, ...result })
+    }
+
+    if (method === 'POST' && path === '/api/mirror/stop') {
+      const body = await readBody(req)
+      await mirrorModule.stopSession(String(body?.deviceId || ''))
+      return sendJson(res, 200, { success: true })
+    }
+
+    if (method === 'POST' && path === '/api/mirror/control') {
+      const body = await readBody(req)
+      const message = body?.message || {}
+      const deviceId = String(body?.deviceId || '')
+      let result = false
+      switch (message.kind) {
+        case 'touch':
+          result = mirrorModule.touch(deviceId, message)
+          break
+        case 'key':
+          result = mirrorModule.key(deviceId, message)
+          break
+        case 'text':
+          result = mirrorModule.text(deviceId, message.text)
+          break
+        case 'scroll':
+          result = mirrorModule.scroll(deviceId, message)
+          break
+        case 'clipboard':
+          result = mirrorModule.clipboard(deviceId, message)
+          break
+        case 'command':
+          result = mirrorModule.command(deviceId, message.command, message)
+          break
+        default:
+          break
+      }
+      return sendJson(res, 200, { success: result })
+    }
+
+    if (method === 'GET' && path === '/api/mirror/keymap') {
+      const deviceId = String(url.searchParams.get('deviceId') || '')
+      return sendJson(res, 200, { success: true, ...mirrorModule.getKeymap(deviceId) })
+    }
+
+    if (method === 'POST' && path === '/api/mirror/keymap') {
+      const body = await readBody(req)
+      const saved = mirrorModule.saveKeymap(String(body?.deviceId || ''), body)
+      return sendJson(res, 200, { success: true, ...saved })
     }
 
     return sendJson(res, 404, { success: false, error: 'Not found' })

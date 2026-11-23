@@ -1514,5 +1514,6 @@
   "update.new-version": "新しいバージョン",
   "update.not-available": "最新のバージョンを使用しています",
   "update.progress": "更新中...",
-  "update.title": "更新が利用可能です"
+  "update.title": "更新が利用可能です",
+  "keyboard.mapping.field.direction": "方向"
 }

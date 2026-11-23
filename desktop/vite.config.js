@@ -26,6 +26,8 @@ const alias = {
   $explorer: resolve('pages/explorer'),
   $tasks: resolve('pages/tasks'),
   $terminal: resolve('pages/terminal'),
+  $mirror: resolve('pages/mirror'),
+  $groupControl: resolve('pages/group-control'),
 }
 
 function mergeCommon(config) {
@@ -70,6 +72,8 @@ export default defineConfig((args) => {
             explorer: resolve('pages/explorer/index.html'),
             tasks: resolve('pages/tasks/index.html'),
             terminal: resolve('pages/terminal/index.html'),
+            'group-control': resolve('pages/group-control/index.html'),
+            mirror: resolve('pages/mirror/index.html'),
           },
           output: {
             manualChunks(id) {

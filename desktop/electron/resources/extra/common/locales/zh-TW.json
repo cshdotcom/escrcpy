@@ -1575,5 +1575,6 @@
   "update.new-version": "新版本",
   "update.not-available": "已經是最新版本",
   "update.progress": "正在更新",
-  "update.title": "發現新版本"
+  "update.title": "發現新版本",
+  "keyboard.mapping.field.direction": "方向"
 }

@@ -51,6 +51,7 @@ import {
   terminalModule,
   webModule,
   groupControlModule,
+  mirrorModule,
 } from './modules/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -92,6 +93,7 @@ mainApp.use(tasksModule)
 mainApp.use(terminalModule)
 mainApp.use(webModule)
 mainApp.use(groupControlModule)
+mainApp.use(mirrorModule)
 
 app.whenReady().then(() => {
   mainApp.start()

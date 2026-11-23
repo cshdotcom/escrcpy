@@ -123,6 +123,28 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
     aside.open { transform: none; }
     .msg { max-width: 94%; }
   }
+
+  /* ── mirror ── */
+  #mirror-page { flex: 1; min-width: 0; }
+  .mirror-wrap { height: 100%; display: flex; flex-direction: column; }
+  .mirror-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  .mirror-body { flex: 1; min-height: 0; display: flex; }
+  .mirror-stage { flex: 1; min-width: 0; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .mirror-video-wrap { position: relative; background: #000; touch-action: none; }
+  .mirror-video-wrap video, .mirror-video-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #mirror-overlay { position: absolute; inset: 0; }
+  #mirror-overlay .km-dot { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgba(79,124,255,.45); border: 1px solid rgba(255,255,255,.75); display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; cursor: pointer; }
+  #mirror-overlay .km-dot.active { border: 2px solid #fff; background: rgba(79,124,255,.75); }
+  .mirror-empty { position: absolute; color: var(--muted); font-size: 13px; pointer-events: none; }
+  .mirror-keymap { width: 230px; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; }
+  .keymap-actions { display: flex; gap: 6px; padding: 8px; }
+  .keymap-hint { padding: 8px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
+  #keymap-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .km-row { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .km-row:hover { background: var(--panel2); }
+  .km-row.active { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+  .km-row .km-name { flex: 1; font-size: 12px; }
+  .km-row .km-key { font-size: 10px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -144,6 +166,7 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
     <nav class="tabs">
       <button id="tab-chat" class="active">对话</button>
       <button id="tab-tasks">自动任务</button>
+      <button id="tab-mirror">镜像</button>
     </nav>
     <span class="spacer"></span>
     <span class="chip" id="chip-devices">设备 <b>—</b></span>
@@ -180,6 +203,40 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
     <section id="tasks-page" style="display:none">
       <div id="task-list"></div>
       <div id="run-history"><h3>运行历史</h3><div id="run-list"></div></div>
+    </section>
+
+    <!-- mirror (内嵌镜像) -->
+    <section id="mirror-page" style="display:none">
+      <div class="mirror-wrap">
+        <div class="mirror-toolbar">
+          <select id="mirror-device" style="min-width:170px"><option value="">选择设备…</option></select>
+          <button class="btn" id="mirror-start">连接</button>
+          <button class="btn ghost" id="mirror-stop">断开</button>
+          <span class="chip" id="mirror-status">未连接</span>
+          <span class="chip" id="mirror-fps">— fps</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="mirror-keymap-toggle">键位映射</button>
+        </div>
+        <div class="mirror-body">
+          <div class="mirror-stage" id="mirror-stage">
+            <div class="mirror-video-wrap" id="mirror-video-wrap">
+              <video id="mirror-video" autoplay muted playsinline></video>
+              <canvas id="mirror-canvas"></canvas>
+              <div id="mirror-overlay"></div>
+            </div>
+            <div class="mirror-empty" id="mirror-empty">选择设备并点击「连接」开始镜像</div>
+          </div>
+          <aside class="mirror-keymap" id="mirror-keymap" style="display:none">
+            <div class="side-head"><span>键盘映射</span><button class="icon-btn" id="keymap-add">＋</button></div>
+            <div class="keymap-actions">
+              <button class="btn ghost small" id="keymap-capture">绑定按键</button>
+              <button class="btn ghost small" id="keymap-del">删除选中</button>
+            </div>
+            <div id="keymap-list"></div>
+            <div class="keymap-hint">点「＋」后在画面上点击添加映射；选中后点「绑定按键」并按下键盘。</div>
+          </aside>
+        </div>
+      </div>
     </section>
   </main>
 </div>
@@ -539,12 +596,16 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
   function switchTab(tab) {
     $('tab-chat').classList.toggle('active', tab === 'chat');
     $('tab-tasks').classList.toggle('active', tab === 'tasks');
+    $('tab-mirror').classList.toggle('active', tab === 'mirror');
     $('chat-page').style.display = tab === 'chat' ? 'flex' : 'none';
     $('tasks-page').style.display = tab === 'tasks' ? 'block' : 'none';
+    $('mirror-page').style.display = tab === 'mirror' ? 'flex' : 'none';
     if (tab === 'tasks') refreshTasks();
+    if (tab === 'mirror') initMirrorTab();
   }
   $('tab-chat').addEventListener('click', function () { switchTab('chat'); });
   $('tab-tasks').addEventListener('click', function () { switchTab('tasks'); });
+  $('tab-mirror').addEventListener('click', function () { switchTab('mirror'); });
 
   // ── tasks ─────────────────────────────────────────────
   function refreshTasks() {
@@ -621,6 +682,429 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
       }).join('');
     }).catch(function () {});
   }
+
+
+  // ── mirror (内嵌镜像) ─────────────────────────────────
+  var mirror = {
+    deviceId: '',
+    running: false,
+    decoder: null,
+    writer: null,
+    source: null,
+    config: null,
+    awaitingKeyframe: true,
+    width: 720,
+    height: 1280,
+    frames: 0,
+    fps: 0,
+    lastFpsAt: 0,
+    pointers: {},
+    keymap: { profiles: [], activeId: null },
+    selectedId: null,
+    adding: false,
+    capturing: false,
+  };
+
+  var MIRROR_CODECS = { h264: 'avc1.4d001f', h265: 'hev1.1.6.L93.B0', av01: 'av01.0.01M.08' };
+
+  function mirrorSetupDecoder() {
+    try { mirror.decoder && mirror.decoder.close(); } catch (e) {}
+    var Generator = window.MediaStreamTrackGenerator;
+    if (Generator) {
+      try {
+        var track = new Generator({ kind: 'video' });
+        $('mirror-video').srcObject = new MediaStream([track]);
+        mirror.writer = track.writable.getWriter();
+        $('mirror-video').style.display = 'block';
+        $('mirror-canvas').style.display = 'none';
+      } catch (e) { mirror.writer = null; }
+    }
+    mirror.decoder = new VideoDecoder({
+      output: function (frame) {
+        if (mirror.writer) {
+          mirror.writer.write(frame).catch(function () { try { frame.close(); } catch (e) {} });
+        } else {
+          try {
+            var canvas = $('mirror-canvas');
+            var ctx = canvas.getContext('2d');
+            canvas.width = frame.displayWidth;
+            canvas.height = frame.displayHeight;
+            ctx.drawImage(frame, 0, 0);
+          } catch (e) {}
+          frame.close();
+        }
+        mirror.frames += 1;
+      },
+      error: function (err) {
+        console.warn('[WebMirror] decoder error', err && err.message);
+        mirror.decoder = null;
+        mirror.awaitingKeyframe = true;
+      },
+    });
+    mirror.decoder.configure({ codec: MIRROR_CODECS[mirror.codec] || MIRROR_CODECS.h264, optimizeForLatency: true });
+    mirror.awaitingKeyframe = true;
+  }
+
+  function mirrorHandleEvent(event) {
+    if (!event) return;
+    if (event.type === 'metadata') {
+      mirror.width = event.width || mirror.width;
+      mirror.height = event.height || mirror.height;
+      mirror.codec = event.codec || 'h264';
+      mirrorResize();
+      return;
+    }
+    if (event.type === 'close' || event.type === 'error') {
+      setMirrorStatus(event.type === 'error' ? ('错误：' + (event.message || '')) : '已断开');
+      return;
+    }
+    if (event.type === 'data' && event.stream === 'video') {
+      if (!mirror.decoder) return;
+      if (mirror.awaitingKeyframe && !event.keyframe) return;
+      var raw = event.data ? base64ToBytes(event.data) : new Uint8Array(0);
+      if (event.keyframe && mirror.config && mirror.config.length) {
+        var merged = new Uint8Array(mirror.config.length + raw.length);
+        merged.set(mirror.config, 0); merged.set(raw, mirror.config.length);
+        raw = merged; mirror.config = null;
+      }
+      try {
+        mirror.decoder.decode(new EncodedVideoChunk({
+          type: event.keyframe ? 'key' : 'delta',
+          timestamp: Number(event.pts || 0),
+          data: raw,
+        }));
+        mirror.awaitingKeyframe = false;
+      } catch (e) { mirror.awaitingKeyframe = true; }
+      return;
+    }
+    if (event.type === 'configuration' && event.stream === 'video') {
+      mirror.config = event.data ? base64ToBytes(event.data) : null;
+      return;
+    }
+  }
+
+  function base64ToBytes(value) {
+    var bin = atob(value);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function setMirrorStatus(text) {
+    var el = $('mirror-status');
+    if (el) el.textContent = text;
+  }
+
+  function mirrorResize() {
+    var wrap = $('mirror-video-wrap');
+    var stage = $('mirror-stage');
+    if (!wrap || !stage) return;
+    var rect = stage.getBoundingClientRect();
+    var ratio = (mirror.width || 9) / (mirror.height || 16);
+    var w = rect.width;
+    var h = w / ratio;
+    if (h > rect.height) { h = rect.height; w = h * ratio; }
+    wrap.style.width = Math.round(w) + 'px';
+    wrap.style.height = Math.round(h) + 'px';
+  }
+
+  function mirrorControl(message) {
+    return api('POST', '/api/mirror/control', { deviceId: mirror.deviceId, message: message }).catch(function () {});
+  }
+
+  function mirrorNormalized(e) {
+    var rect = $('mirror-video-wrap').getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  }
+
+  function mirrorBindTouch() {
+    var wrap = $('mirror-video-wrap');
+    if (!wrap || wrap.dataset.bound) return;
+    wrap.dataset.bound = '1';
+    var nextId = 1;
+    wrap.addEventListener('pointerdown', function (e) {
+      if (!mirror.running) return;
+      if (mirror.adding) { addKeymapAt(e); return; }
+      e.preventDefault();
+      try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+      var point = mirrorNormalized(e);
+      var pointerId = -nextId; nextId += 1;
+      mirror.pointers[e.pointerId] = pointerId;
+      mirrorControl({ kind: 'touch', action: 'down', pointerId: pointerId, x: point.x, y: point.y, normalized: true });
+    });
+    wrap.addEventListener('pointermove', function (e) {
+      var pointerId = mirror.pointers[e.pointerId];
+      if (!pointerId) return;
+      e.preventDefault();
+      var point = mirrorNormalized(e);
+      mirrorControl({ kind: 'touch', action: 'move', pointerId: pointerId, x: point.x, y: point.y, normalized: true });
+    });
+    function up(e) {
+      var pointerId = mirror.pointers[e.pointerId];
+      if (!pointerId) return;
+      delete mirror.pointers[e.pointerId];
+      var point = mirrorNormalized(e);
+      mirrorControl({ kind: 'touch', action: 'up', pointerId: pointerId, x: point.x, y: point.y, normalized: true, pressure: 0 });
+    }
+    wrap.addEventListener('pointerup', up);
+    wrap.addEventListener('pointercancel', up);
+    wrap.addEventListener('wheel', function (e) {
+      if (!mirror.running) return;
+      e.preventDefault();
+      var point = mirrorNormalized(e);
+      mirrorControl({ kind: 'scroll', x: point.x, y: point.y, normalized: true, scrollX: e.deltaX / 800, scrollY: e.deltaY / 800 });
+    }, { passive: false });
+    window.addEventListener('resize', mirrorResize);
+    mirrorResize();
+  }
+
+  function initMirrorTab() {
+    mirrorBindTouch();
+    api('GET', '/api/devices').then(function (data) {
+      var devices = data.devices || [];
+      var select = $('mirror-device');
+      var current = select.value;
+      select.innerHTML = '<option value="">选择设备…</option>' + devices.map(function (d) {
+        return '<option value="' + esc(d.id) + '">' + esc(d.id) + ' (' + esc(d.status) + ')</option>';
+      }).join('');
+      select.value = current;
+    }).catch(function () {});
+    loadKeymap();
+  }
+
+  function startMirror() {
+    var deviceId = $('mirror-device').value;
+    if (!deviceId) { toast('请先选择设备'); return; }
+    mirror.deviceId = deviceId;
+    setMirrorStatus('连接中…');
+    $('mirror-empty').style.display = 'none';
+    api('POST', '/api/mirror/start', { deviceId: deviceId }).then(function (data) {
+      mirror.running = true;
+      mirror.width = data.width || 720;
+      mirror.height = data.height || 1280;
+      mirror.codec = data.codec || 'h264';
+      mirrorResize();
+      mirrorSetupDecoder();
+      if (mirror.source) mirror.source.close();
+      mirror.source = new EventSource('/api/mirror/stream?deviceId=' + encodeURIComponent(deviceId));
+      mirror.source.onmessage = function (e) {
+        try { mirrorHandleEvent(JSON.parse(e.data)); } catch (err) {}
+      };
+      mirror.source.onerror = function () { setMirrorStatus('连接中断'); };
+      setMirrorStatus('已连接');
+      mirror.lastFpsAt = Date.now();
+      mirror.frames = 0;
+      setInterval(function () {
+        var now = Date.now();
+        var elapsed = Math.max(1, now - mirror.lastFpsAt) / 1000;
+        mirror.fps = Math.round(mirror.frames / elapsed);
+        mirror.frames = 0;
+        mirror.lastFpsAt = now;
+        var fpsEl = $('mirror-fps');
+        if (fpsEl) fpsEl.textContent = mirror.fps + ' fps';
+      }, 1000);
+    }).catch(function (e) {
+      setMirrorStatus('连接失败');
+      toast('镜像启动失败：' + e.message);
+      $('mirror-empty').style.display = 'block';
+    });
+  }
+
+  function stopMirror() {
+    if (mirror.source) { mirror.source.close(); mirror.source = null; }
+    try { mirror.decoder && mirror.decoder.close(); } catch (e) {}
+    mirror.decoder = null;
+    mirror.running = false;
+    api('POST', '/api/mirror/stop', { deviceId: mirror.deviceId }).catch(function () {});
+    setMirrorStatus('已断开');
+    $('mirror-empty').style.display = 'block';
+  }
+
+  // ── web keymap (simplified editor) ────────────────────
+  function loadKeymap() {
+    api('GET', '/api/mirror/keymap?deviceId=' + encodeURIComponent(mirror.deviceId || $('mirror-device').value || ''))
+      .then(function (data) {
+        mirror.keymap.profiles = data.profiles || [];
+        mirror.keymap.activeId = data.activeId || (mirror.keymap.profiles[0] && mirror.keymap.profiles[0].id) || null;
+        renderKeymap();
+      }).catch(function () {});
+  }
+
+  function activeProfile() {
+    var id = mirror.keymap.activeId;
+    for (var i = 0; i < mirror.keymap.profiles.length; i++) {
+      if (mirror.keymap.profiles[i].id === id) return mirror.keymap.profiles[i];
+    }
+    return null;
+  }
+
+  function renderKeymap() {
+    var list = $('keymap-list');
+    if (!list) return;
+    var profile = activeProfile();
+    if (!profile || !profile.mappings.length) {
+      list.innerHTML = '<div class="empty">暂无映射</div>';
+      renderOverlay();
+      return;
+    }
+    list.innerHTML = profile.mappings.map(function (m) {
+      return '<div class="km-row' + (m.id === mirror.selectedId ? ' active' : '') + '" data-id="' + esc(m.id) + '">'
+        + '<span class="km-name">点击</span>'
+        + '<span class="km-key">' + esc((m.trigger && m.trigger.combo) || '未绑定') + '</span>'
+        + '</div>';
+    }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('[data-id]'), function (el) {
+      el.addEventListener('click', function () {
+        mirror.selectedId = el.getAttribute('data-id');
+        renderKeymap();
+      });
+    });
+    renderOverlay();
+  }
+
+  function renderOverlay() {
+    var overlay = $('mirror-overlay');
+    if (!overlay) return;
+    overlay.innerHTML = '';
+    var profile = activeProfile();
+    if (!profile) return;
+    profile.mappings.forEach(function (m) {
+      if (m.kind !== 'tap') return;
+      var dot = document.createElement('div');
+      dot.className = 'km-dot' + (m.id === mirror.selectedId ? ' active' : '');
+      dot.style.left = (Number(m.position && m.position.x || 0) * 100) + '%';
+      dot.style.top = (Number(m.position && m.position.y || 0) * 100) + '%';
+      dot.textContent = (m.trigger && m.trigger.combo) || '点击';
+      dot.addEventListener('click', function (e) {
+        e.stopPropagation();
+        mirror.selectedId = m.id;
+        renderKeymap();
+      });
+      overlay.appendChild(dot);
+    });
+  }
+
+  function addKeymapAt(event) {
+    var profile = activeProfile();
+    if (!profile) {
+      profile = { id: 'profile_' + Date.now(), name: 'Default', mappings: [], settings: {} };
+      mirror.keymap.profiles.push(profile);
+      mirror.keymap.activeId = profile.id;
+    }
+    var point = mirrorNormalized(event);
+    var mapping = {
+      id: 'map_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      kind: 'tap',
+      enabled: true,
+      trigger: null,
+      position: point,
+      action: { type: 'tap' },
+    };
+    profile.mappings.push(mapping);
+    mirror.selectedId = mapping.id;
+    mirror.adding = false;
+    saveKeymap();
+    renderKeymap();
+  }
+
+  function saveKeymap() {
+    var deviceId = mirror.deviceId || $('mirror-device').value;
+    if (!deviceId) return;
+    return api('POST', '/api/mirror/keymap', {
+      deviceId: deviceId,
+      profiles: mirror.keymap.profiles,
+      activeId: mirror.keymap.activeId,
+    }).catch(function () {});
+  }
+
+  function findMappingByCombo(combo) {
+    var profile = activeProfile();
+    if (!profile) return null;
+    for (var i = 0; i < profile.mappings.length; i++) {
+      var m = profile.mappings[i];
+      if (m.enabled !== false && m.trigger && m.trigger.combo === combo) return m;
+    }
+    return null;
+  }
+
+  function comboFromEvent(e) {
+    var parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Meta');
+    var code = e.code || '';
+    var key = code.indexOf('Key') === 0 ? code.slice(3) : code.indexOf('Digit') === 0 ? code.slice(5) : code;
+    if (key) parts.push(key);
+    return parts.join('+');
+  }
+
+  function handleMirrorKeyDown(e) {
+    if ($('mirror-page').style.display === 'none') return;
+    if (mirror.capturing) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code !== 'Escape') {
+        var profile = activeProfile();
+        var mapping = profile && profile.mappings.find(function (m) { return m.id === mirror.selectedId; });
+        if (mapping) {
+          mapping.trigger = { combo: comboFromEvent(e), code: e.code };
+          saveKeymap();
+          renderKeymap();
+        }
+      }
+      mirror.capturing = false;
+      setMirrorStatus('已连接');
+      return;
+    }
+    if (!mirror.running) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+
+    var combo = comboFromEvent(e);
+    var hit = findMappingByCombo(combo);
+    if (hit) {
+      e.preventDefault();
+      mirrorControl({ kind: 'touch', action: 'down', pointerId: -99, x: hit.position.x, y: hit.position.y, normalized: true });
+      setTimeout(function () {
+        mirrorControl({ kind: 'touch', action: 'up', pointerId: -99, x: hit.position.x, y: hit.position.y, normalized: true, pressure: 0 });
+      }, 40);
+      return;
+    }
+    // basic key passthrough
+    if (e.code === 'Escape') { e.preventDefault(); mirrorControl({ kind: 'command', command: 'back' }); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); mirrorControl({ kind: 'key', action: 'down', keyCode: 67 }); return; }
+    if (e.key === 'Enter') { e.preventDefault(); mirrorControl({ kind: 'key', action: 'down', keyCode: 66 }); return; }
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      mirrorControl({ kind: 'text', text: e.key });
+    }
+  }
+
+  $('mirror-start').addEventListener('click', startMirror);
+  $('mirror-stop').addEventListener('click', stopMirror);
+  $('mirror-device').addEventListener('change', function () { mirror.deviceId = this.value; loadKeymap(); });
+  $('mirror-keymap-toggle').addEventListener('click', function () {
+    var panel = $('mirror-keymap');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  });
+  $('keymap-add').addEventListener('click', function () { mirror.adding = true; toast('在画面上点击以添加映射'); });
+  $('keymap-capture').addEventListener('click', function () {
+    if (!mirror.selectedId) { toast('请先选择一个映射'); return; }
+    mirror.capturing = true;
+    setMirrorStatus('请按下要绑定的按键（Esc 取消）');
+  });
+  $('keymap-del').addEventListener('click', function () {
+    var profile = activeProfile();
+    if (!profile || !mirror.selectedId) return;
+    profile.mappings = profile.mappings.filter(function (m) { return m.id !== mirror.selectedId; });
+    mirror.selectedId = null;
+    saveKeymap();
+    renderKeymap();
+  });
+  window.addEventListener('keydown', handleMirrorKeyDown, true);
 
   // ── boot ──────────────────────────────────────────────
   fetch('/api/status', { credentials: 'same-origin' }).then(function (res) {

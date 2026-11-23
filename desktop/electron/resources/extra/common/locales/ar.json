@@ -1514,5 +1514,6 @@
   "update.new-version": "إصدار جديد",
   "update.not-available": "الإصدار الأحدث بالفعل",
   "update.progress": "جارٍ التحديث...",
-  "update.title": "يوجد تحديث جديد"
+  "update.title": "يوجد تحديث جديد",
+  "keyboard.mapping.field.direction": "الاتجاه"
 }

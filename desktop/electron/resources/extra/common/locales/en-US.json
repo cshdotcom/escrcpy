@@ -1575,5 +1575,6 @@
   "update.new-version": "New Version",
   "update.not-available": "Already latest version",
   "update.progress": "Updating...",
-  "update.title": "Update Available"
+  "update.title": "Update Available",
+  "keyboard.mapping.field.direction": "Direction"
 }

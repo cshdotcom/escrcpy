@@ -44,6 +44,7 @@ import Record from './components/record/index.vue'
 import Camera from './components/camera/index.vue'
 import Otg from './components/otg/index.vue'
 import Custom from './components/custom/index.vue'
+import MirrorInset from './components/mirror/index.vue'
 
 const props = defineProps({
   ...Record.props,
@@ -54,6 +55,10 @@ const props = defineProps({
 
 const options = computed(() => {
   return [
+    {
+      label: 'device.actions.more.mirror.inset',
+      component: MirrorInset,
+    },
     {
       label: 'device.actions.more.record.name',
       component: Record,

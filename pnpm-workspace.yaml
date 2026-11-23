@@ -35,3 +35,6 @@ allowBuilds:
   sharp: false
   vue-demi: false
   electron-winstaller: false
+
+minimumReleaseAgeExclude:
+  - konva@10.11.0

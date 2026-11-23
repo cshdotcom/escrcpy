@@ -1514,5 +1514,6 @@
   "update.new-version": "Новая версия",
   "update.not-available": "Установлена последняя версия",
   "update.progress": "Обновление...",
-  "update.title": "Доступно обновление"
+  "update.title": "Доступно обновление",
+  "keyboard.mapping.field.direction": "Направление"
 }
