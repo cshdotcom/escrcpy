@@ -2,9 +2,15 @@
   <div class="h-full flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
     <div class="flex-none flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
       <el-radio-group v-model="kindFilter" size="small" @change="emit('refresh')">
-        <el-radio-button value="">{{ $t('tasks.history.all') }}</el-radio-button>
-        <el-radio-button value="task">{{ $t('tasks.tab.tasks') }}</el-radio-button>
-        <el-radio-button value="workflow">{{ $t('tasks.tab.workflows') }}</el-radio-button>
+        <el-radio-button value="">
+          {{ $t('tasks.history.all') }}
+        </el-radio-button>
+        <el-radio-button value="task">
+          {{ $t('tasks.tab.tasks') }}
+        </el-radio-button>
+        <el-radio-button value="workflow">
+          {{ $t('tasks.tab.workflows') }}
+        </el-radio-button>
       </el-radio-group>
 
       <div class="flex-1" />
@@ -20,7 +26,9 @@
       <div class="p-3">
         <el-table :data="filteredRuns" size="small" :show-header="true" style="width: 100%">
           <el-table-column prop="startedAt" :label="$t('tasks.history.time')" width="170">
-            <template #default="{ row }">{{ formatDateTime(row.startedAt) }}</template>
+            <template #default="{ row }">
+              {{ formatDateTime(row.startedAt) }}
+            </template>
           </el-table-column>
 
           <el-table-column prop="refName" :label="$t('tasks.history.name')" min-width="160" show-overflow-tooltip>
@@ -55,7 +63,9 @@
           </el-table-column>
 
           <el-table-column prop="durationMs" :label="$t('tasks.history.duration')" width="80">
-            <template #default="{ row }">{{ formatDuration(row.durationMs) }}</template>
+            <template #default="{ row }">
+              {{ formatDuration(row.durationMs) }}
+            </template>
           </el-table-column>
 
           <el-table-column :label="$t('common.control')" width="80" fixed="right">

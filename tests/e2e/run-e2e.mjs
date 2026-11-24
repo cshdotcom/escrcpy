@@ -157,7 +157,7 @@ function writeBaseConfig() {
   // IMPORTANT: electron-store persists NESTED objects — the keys
   // 'copilot.settings' / 'common.adbDir' are dot-paths, not flat keys.
   const config = {
-    version: '3.8.0', // match app version so migrations keep our adbDir
+    version: '3.10.0', // match app version so migrations keep our adbDir
 
     // ── v3.8.0 scheduler probes ──
     // A task overdue by >24h must be SKIPPED with a recorded reason; a task
@@ -1120,6 +1120,39 @@ async function main() {
 
   const webPage = await fetch(`http://127.0.0.1:${WEB_PORT}/`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.text()).catch(() => '')
   check('S12.6 web page ships the mirror tab + WebCodecs decoder', webPage.includes('tab-mirror') && webPage.includes('VideoDecoder'), `len=${webPage.length}`)
+
+  // ════════ S13 · v3.10.0: visual workflow editor + web workflow chain ════════
+  console.log('\n[S13] visual workflow editor + web workflow chain')
+
+  const wfSave = await main2.evaluate(`(async () => {
+    const workflow = {
+      id: 'wf_e2e_visual',
+      name: 'E2E visual workflow',
+      description: 'delay-only chain for the visual editor',
+      notifyOnComplete: false,
+      steps: [{ id: 'step_delay_1', type: 'delay', name: 'Wait', seconds: 1 }],
+    }
+    const r = await window.$preload.ipcxRenderer.invoke('workflows:save', { workflow })
+    return JSON.stringify(r)
+  })()`)
+  let wfSaved = null
+  try {
+    wfSaved = JSON.parse(wfSave)
+  }
+  catch {}
+  check('S13.1 workflow saves through IPC', Boolean(wfSaved?.success), wfSave.slice(0, 140))
+
+  const webWorkflows = await fetch(`http://127.0.0.1:${WEB_PORT}/api/workflows`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.json()).catch(() => null)
+  const webWf = (webWorkflows?.workflows || []).find(w => w.id === 'wf_e2e_visual')
+  check('S13.2 web /api/workflows returns the chain with steps', Boolean(webWf && webWf.steps?.length === 1 && webWf.steps[0].type === 'delay'), JSON.stringify(webWf)?.slice(0, 160))
+
+  const webWfRun = await fetch(`http://127.0.0.1:${WEB_PORT}/api/workflows/wf_e2e_visual/run`, {
+    method: 'POST', headers: { cookie: `escrcpy_web=${cookieToken}` },
+  }).then(r => r.json()).catch(() => null)
+  check('S13.3 web runs the workflow end-to-end', Boolean(webWfRun?.success && webWfRun?.run?.status === 'SUCCESS'), JSON.stringify(webWfRun)?.slice(0, 160))
+
+  const webPageWf = await fetch(`http://127.0.0.1:${WEB_PORT}/`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.text()).catch(() => '')
+  check('S13.4 web page renders the workflow chain panel', webPageWf.includes('workflow-list') && webPageWf.includes('refreshWorkflows'), `len=${webPageWf.length}`)
 
   // teardown
   main.close(); main2.close(); copilot.close(); copilot2.close()

@@ -18,6 +18,7 @@
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import fs from 'node:fs'
+import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { getAdb } from '$electron/configs/which/index.js'
 import { extraResolve } from '$electron/process/resources.js'
@@ -34,7 +35,12 @@ function adbPath() {
 }
 
 export function serverJarPath() {
-  return extraResolve('common/scrcpy/scrcpy-server')
+  const candidates = [
+    extraResolve('common/scrcpy/scrcpy-server'),
+    path.resolve('electron/resources/extra/common/scrcpy/scrcpy-server'),
+    path.resolve(process.resourcesPath || '', 'extra/common/scrcpy/scrcpy-server'),
+  ]
+  return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0]
 }
 
 export function execFile(file, args, { timeout = 15000 } = {}) {

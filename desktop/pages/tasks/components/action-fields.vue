@@ -120,11 +120,11 @@
       </el-form-item>
 
       <el-form-item v-if="config.method !== 'GET'" :label="$t('tasks.action.headers')">
-        <el-input v-model="config.headers" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder='{ "Authorization": "Bearer ..." }' />
+        <el-input v-model="config.headers" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="{ &quot;Authorization&quot;: &quot;Bearer ...&quot; }" />
       </el-form-item>
 
       <el-form-item v-if="!['GET', 'DELETE'].includes(config.method)" :label="$t('tasks.action.body')">
-        <el-input v-model="config.body" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder='{ "key": "value" }' />
+        <el-input v-model="config.body" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="{ &quot;key&quot;: &quot;value&quot; }" />
       </el-form-item>
     </template>
 

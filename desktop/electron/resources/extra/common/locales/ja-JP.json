@@ -1515,5 +1515,12 @@
   "update.not-available": "最新のバージョンを使用しています",
   "update.progress": "更新中...",
   "update.title": "更新が利用可能です",
-  "keyboard.mapping.field.direction": "方向"
+  "keyboard.mapping.field.direction": "方向",
+  "tasks.workflow.canvas.zoomIn": "拡大",
+  "tasks.workflow.canvas.zoomOut": "縮小",
+  "tasks.workflow.canvas.fit": "キャンバスに合わせる",
+  "tasks.workflow.canvas.autoLayout": "自動整列",
+  "tasks.workflow.canvas.hint": "ノードをドラッグして移動、別のノードに重ねて順序を挿入。Ctrl+ホイールで拡大、背景をドラッグで移動",
+  "tasks.workflow.canvas.addStep": "ステップを追加",
+  "tasks.workflow.canvas.inspector": "ステップ設定"
 }

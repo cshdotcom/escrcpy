@@ -57,12 +57,16 @@
             <i class="i-solar-route-bold-duotone" />
           </div>
           <div class="text-center">
-            <div class="text-sm font-medium">{{ $t('tasks.workflow.empty.title') }}</div>
+            <div class="text-sm font-medium">
+              {{ $t('tasks.workflow.empty.title') }}
+            </div>
             <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-md">
               {{ $t('tasks.workflow.empty.description') }}
             </div>
           </div>
-          <el-button size="small" round plain @click="emit('create')">{{ $t('tasks.workflow.create') }}</el-button>
+          <el-button size="small" round plain @click="emit('create')">
+            {{ $t('tasks.workflow.create') }}
+          </el-button>
         </div>
       </div>
     </el-scrollbar>

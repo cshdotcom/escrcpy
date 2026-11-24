@@ -14,7 +14,9 @@
 
       <div v-else-if="error" class="flex flex-col items-center justify-center py-12 gap-2">
         <span class="text-xs text-red-500">{{ error }}</span>
-        <el-button size="small" @click="loadScreenshot">{{ $t('tasks.refresh') }}</el-button>
+        <el-button size="small" @click="loadScreenshot">
+          {{ $t('tasks.refresh') }}
+        </el-button>
       </div>
 
       <div

@@ -1515,5 +1515,12 @@
   "update.not-available": "Установлена последняя версия",
   "update.progress": "Обновление...",
   "update.title": "Доступно обновление",
-  "keyboard.mapping.field.direction": "Направление"
+  "keyboard.mapping.field.direction": "Направление",
+  "tasks.workflow.canvas.zoomIn": "Приблизить",
+  "tasks.workflow.canvas.zoomOut": "Отдалить",
+  "tasks.workflow.canvas.fit": "Вписать в холст",
+  "tasks.workflow.canvas.autoLayout": "Автоупорядочить",
+  "tasks.workflow.canvas.hint": "Перетаскивайте узлы; отпустите узел на другом, чтобы вставить его в цепочку. Ctrl+колесо — масштаб, фон — панорама.",
+  "tasks.workflow.canvas.addStep": "Добавить шаг",
+  "tasks.workflow.canvas.inspector": "Настройки шага"
 }

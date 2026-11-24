@@ -1576,5 +1576,12 @@
   "update.not-available": "已经是最新版本",
   "update.progress": "正在更新中",
   "update.title": "发现新版本",
-  "keyboard.mapping.field.direction": "方向"
+  "keyboard.mapping.field.direction": "方向",
+  "tasks.workflow.canvas.zoomIn": "放大",
+  "tasks.workflow.canvas.zoomOut": "缩小",
+  "tasks.workflow.canvas.fit": "适应画布",
+  "tasks.workflow.canvas.autoLayout": "自动排列",
+  "tasks.workflow.canvas.hint": "拖动节点调整位置，把节点拖到另一个节点上可插入顺序；Ctrl+滚轮缩放，拖动空白处平移",
+  "tasks.workflow.canvas.addStep": "添加步骤",
+  "tasks.workflow.canvas.inspector": "步骤配置"
 }

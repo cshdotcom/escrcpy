@@ -27,8 +27,9 @@ import {
   executeTaskById,
   listSessionsForPicker,
   runWebChat,
+  runWorkflow,
 } from '../tasks/helpers/executor.js'
-import { getTasks, patchTask, queryRuns } from '../tasks/helpers/store.js'
+import { getTasks, getWorkflows, patchTask, queryRuns } from '../tasks/helpers/store.js'
 import { computeNextRunAt } from '../tasks/helpers/schedule-helper.js'
 import mirrorModule from '../mirror/service.js'
 
@@ -71,8 +72,10 @@ let server = null
 let activePort = 0
 let activePassword = ''
 const loginFailures = new Map()
-/** Sessions currently streaming a chat, guarded so one conversation cannot
- * run two turns at once. */
+/**
+ * Sessions currently streaming a chat, guarded so one conversation cannot
+ * run two turns at once.
+ */
 const activeChats = new Set()
 
 function getWebSettings() {
@@ -535,6 +538,32 @@ async function route(req, res) {
       const enabled = body?.enabled !== false
       const updated = patchTask(id, { enabled, nextRunAt: enabled ? computeNextRunAt(task) : null })
       return sendJson(res, 200, { success: true, task: serializeTaskForWeb(updated) })
+    }
+
+    if (method === 'GET' && path === '/api/workflows') {
+      return sendJson(res, 200, {
+        success: true,
+        workflows: getWorkflows().map(workflow => ({
+          id: workflow.id,
+          name: workflow.name,
+          description: workflow.description || '',
+          enabled: workflow.enabled !== false,
+          steps: (workflow.steps || []).map(step => ({
+            id: step.id,
+            type: step.type,
+            name: step.name || '',
+            action: step.action || '',
+            seconds: step.seconds,
+            prompt: step.prompt ? String(step.prompt).slice(0, 120) : '',
+          })),
+        })),
+      })
+    }
+
+    const workflowRunMatch = path.match(/^\/api\/workflows\/([^/]+)\/run$/)
+    if (method === 'POST' && workflowRunMatch) {
+      const run = await runWorkflow(decodeURIComponent(workflowRunMatch[1]), 'manual')
+      return sendJson(res, 200, { success: true, run })
     }
 
     if (method === 'GET' && path === '/api/mirror/status') {

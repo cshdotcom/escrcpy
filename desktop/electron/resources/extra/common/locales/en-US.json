@@ -1576,5 +1576,12 @@
   "update.not-available": "Already latest version",
   "update.progress": "Updating...",
   "update.title": "Update Available",
-  "keyboard.mapping.field.direction": "Direction"
+  "keyboard.mapping.field.direction": "Direction",
+  "tasks.workflow.canvas.zoomIn": "Zoom in",
+  "tasks.workflow.canvas.zoomOut": "Zoom out",
+  "tasks.workflow.canvas.fit": "Fit to canvas",
+  "tasks.workflow.canvas.autoLayout": "Auto layout",
+  "tasks.workflow.canvas.hint": "Drag nodes to reposition; drop a node onto another to insert it in the chain. Ctrl+wheel zooms, drag the background to pan.",
+  "tasks.workflow.canvas.addStep": "Add step",
+  "tasks.workflow.canvas.inspector": "Step settings"
 }

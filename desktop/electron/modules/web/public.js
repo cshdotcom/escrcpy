@@ -124,6 +124,24 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
     .msg { max-width: 94%; }
   }
 
+  /* ── workflows (visual chain) ── */
+  #tasks-page { padding: 14px; overflow-y: auto; display: block; }
+  #workflow-panel { margin-bottom: 18px; }
+  .panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .panel-head h3 { font-size: 14px; font-weight: 600; }
+  .wf-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+  .wf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .wf-name { font-size: 13px; font-weight: 600; }
+  .wf-desc { font-size: 11px; color: var(--muted); }
+  .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .flow .node { padding: 5px 10px; border-radius: 8px; font-size: 11px; border: 1px solid var(--border); background: var(--panel2); }
+  .flow .node.ai { border-color: rgba(59,130,246,.5); color: #93b4ff; }
+  .flow .node.action { border-color: rgba(245,158,11,.5); color: #f0c078; }
+  .flow .node.delay { border-color: rgba(16,185,129,.5); color: #7fd8b4; }
+  .flow .node.start, .flow .node.end { color: var(--muted); }
+  .flow .arrow { color: var(--muted); font-size: 12px; }
+  .wf-run { margin-top: 8px; }
+
   /* ── mirror ── */
   #mirror-page { flex: 1; min-width: 0; }
   .mirror-wrap { height: 100%; display: flex; flex-direction: column; }
@@ -201,6 +219,13 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
 
     <!-- tasks -->
     <section id="tasks-page" style="display:none">
+      <div id="workflow-panel">
+        <div class="panel-head">
+          <h3>工作流</h3>
+          <button class="btn ghost small" id="workflow-refresh">刷新</button>
+        </div>
+        <div id="workflow-list"></div>
+      </div>
       <div id="task-list"></div>
       <div id="run-history"><h3>运行历史</h3><div id="run-list"></div></div>
     </section>
@@ -600,7 +625,7 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
     $('chat-page').style.display = tab === 'chat' ? 'flex' : 'none';
     $('tasks-page').style.display = tab === 'tasks' ? 'block' : 'none';
     $('mirror-page').style.display = tab === 'mirror' ? 'flex' : 'none';
-    if (tab === 'tasks') refreshTasks();
+    if (tab === 'tasks') { refreshTasks(); refreshWorkflows(); }
     if (tab === 'mirror') initMirrorTab();
   }
   $('tab-chat').addEventListener('click', function () { switchTab('chat'); });
@@ -665,6 +690,52 @@ export const WEB_PAGE_HTML = `<!DOCTYPE html>
       refreshRuns();
     }).catch(function (e) { toast(e.message); });
   }
+
+  // ── workflows (visual chain) ─────────────────────────
+  var STEP_LABELS = { ai: 'AI', action: '动作', delay: '延时' };
+  function refreshWorkflows() {
+    api('GET', '/api/workflows').then(function (data) {
+      var list = $('workflow-list');
+      if (!list) return;
+      var items = data.workflows || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">还没有工作流，在桌面端创建后即可在此查看和运行</div>';
+        return;
+      }
+      list.innerHTML = items.map(function (wf) {
+        var nodes = ['<span class="node start">开始</span>'];
+        (wf.steps || []).forEach(function (step) {
+          nodes.push('<span class="arrow">→</span>');
+          var label = step.name || STEP_LABELS[step.type] || step.type;
+          if (step.type === 'delay') label = '等待 ' + (step.seconds || 1) + 's';
+          nodes.push('<span class="node ' + esc(step.type) + '" title="' + esc(step.prompt || step.action || '') + '">' + esc(label) + '</span>');
+        });
+        nodes.push('<span class="arrow">→</span><span class="node end">结束</span>');
+        return '<div class="wf-card">'
+          + '<div class="wf-head"><span class="wf-name">' + esc(wf.name) + '</span>'
+          + '<span class="wf-desc">' + esc(wf.description || '') + '</span></div>'
+          + '<div class="flow">' + nodes.join('') + '</div>'
+          + '<div class="wf-run"><button class="btn small" data-wf-run="' + esc(wf.id) + '">立即运行</button></div>'
+          + '</div>';
+      }).join('');
+      Array.prototype.forEach.call(list.querySelectorAll('[data-wf-run]'), function (el) {
+        el.addEventListener('click', function () {
+          el.disabled = true;
+          el.textContent = '运行中…';
+          api('POST', '/api/workflows/' + encodeURIComponent(el.getAttribute('data-wf-run')) + '/run')
+            .then(function (res) {
+              var run = res.run || {};
+              toast(run.status === 'SUCCESS' ? '工作流执行成功' : (run.status === 'SKIPPED' ? '工作流已跳过' : '工作流执行失败'));
+            })
+            .catch(function (e) { toast('运行失败：' + e.message); })
+            .finally(function () { el.disabled = false; el.textContent = '立即运行'; });
+        });
+      });
+    }).catch(function () {});
+  }
+  var wfRefresh = $('workflow-refresh');
+  if (wfRefresh) wfRefresh.addEventListener('click', refreshWorkflows);
+
   function refreshRuns() {
     api('GET', '/api/runs?limit=30').then(function (data) {
       var runs = data.runs || [];

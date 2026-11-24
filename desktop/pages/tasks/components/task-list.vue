@@ -95,12 +95,16 @@
             <i class="i-solar-alarm-bold-duotone" />
           </div>
           <div class="text-center">
-            <div class="text-sm font-medium">{{ $t('tasks.empty.title') }}</div>
+            <div class="text-sm font-medium">
+              {{ $t('tasks.empty.title') }}
+            </div>
             <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-md">
               {{ $t('tasks.empty.description') }}
             </div>
           </div>
-          <el-button size="small" round plain @click="emit('create')">{{ $t('tasks.create') }}</el-button>
+          <el-button size="small" round plain @click="emit('create')">
+            {{ $t('tasks.create') }}
+          </el-button>
         </div>
       </div>
     </el-scrollbar>
@@ -108,7 +112,7 @@
 </template>
 
 <script setup>
-import { TASK_TYPES, TASK_TYPE_TAG, describeTaskConfig } from '../configs/index.js'
+import { describeTaskConfig, TASK_TYPE_TAG, TASK_TYPES } from '../configs/index.js'
 import CronLabel from './cron-label.vue'
 import { formatDateTime } from '../hooks/use-tasks.js'
 

@@ -11,16 +11,22 @@
         <el-tag type="info" size="small">
           {{ $t(run.trigger === 'schedule' ? 'tasks.history.scheduled' : 'tasks.history.manual') }}
         </el-tag>
-        <el-tag v-if="run.type" size="small" type="warning">{{ $t(`tasks.type.${run.type}`) }}</el-tag>
+        <el-tag v-if="run.type" size="small" type="warning">
+          {{ $t(`tasks.type.${run.type}`) }}
+        </el-tag>
       </div>
 
       <div class="grid grid-cols-2 gap-2 text-xs">
         <div class="px-2.5 py-2 rounded-md bg-gray-50 dark:bg-gray-800">
-          <div class="text-gray-400">{{ $t('tasks.history.started') }}</div>
+          <div class="text-gray-400">
+            {{ $t('tasks.history.started') }}
+          </div>
           <div>{{ formatDateTime(run.startedAt) }}</div>
         </div>
         <div class="px-2.5 py-2 rounded-md bg-gray-50 dark:bg-gray-800">
-          <div class="text-gray-400">{{ $t('tasks.history.duration') }}</div>
+          <div class="text-gray-400">
+            {{ $t('tasks.history.duration') }}
+          </div>
           <div>{{ formatDuration(run.durationMs) }}</div>
         </div>
       </div>
@@ -31,7 +37,9 @@
 
       <!-- Workflow steps -->
       <div v-if="run.steps?.length" class="flex flex-col gap-2">
-        <div class="text-xs font-medium text-gray-500">{{ $t('automation.steps') }}</div>
+        <div class="text-xs font-medium text-gray-500">
+          {{ $t('automation.steps') }}
+        </div>
 
         <div
           v-for="(step, index) in run.steps"
@@ -65,7 +73,9 @@
 
       <!-- Output -->
       <div v-if="run.output" class="flex flex-col gap-1.5">
-        <div class="text-xs font-medium text-gray-500">{{ $t('tasks.history.output') }}</div>
+        <div class="text-xs font-medium text-gray-500">
+          {{ $t('tasks.history.output') }}
+        </div>
         <pre class="px-3 py-2.5 rounded-md bg-gray-50 dark:bg-gray-800 text-xs whitespace-pre-wrap break-all max-h-80 overflow-y-auto">{{ run.output }}</pre>
       </div>
     </div>

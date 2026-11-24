@@ -567,7 +567,7 @@ watch(deviceId, (value, previous) => {
 <style lang="postcss">
 html,
 body {
-  background-color: transparent;
+  background-color: #000000;
   overflow: hidden;
 }
 

@@ -1515,5 +1515,12 @@
   "update.not-available": "الإصدار الأحدث بالفعل",
   "update.progress": "جارٍ التحديث...",
   "update.title": "يوجد تحديث جديد",
-  "keyboard.mapping.field.direction": "الاتجاه"
+  "keyboard.mapping.field.direction": "الاتجاه",
+  "tasks.workflow.canvas.zoomIn": "تكبير",
+  "tasks.workflow.canvas.zoomOut": "تصغير",
+  "tasks.workflow.canvas.fit": "ملاءمة اللوحة",
+  "tasks.workflow.canvas.autoLayout": "ترتيب تلقائي",
+  "tasks.workflow.canvas.hint": "اسحب العقد لتحريكها؛ أفلت عقدة فوق أخرى لإدراجها في السلسلة. Ctrl+العجلة للتكبير، اسحب الخلفية للتحريك.",
+  "tasks.workflow.canvas.addStep": "إضافة خطوة",
+  "tasks.workflow.canvas.inspector": "إعدادات الخطوة"
 }
