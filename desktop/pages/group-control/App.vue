@@ -10,7 +10,7 @@
         {{ $t('common.refresh') }}
       </el-button>
       <el-button size="small" type="primary" :disabled="!selectedDevices.length" @click="openGroupCopilot">
-        <i class="i-solar-chat-square-line-linear mr-1" />
+        <i class="i-solar-chat-line-linear mr-1" />
         {{ $t('groupControl.openGroupCopilot') }}
       </el-button>
     </div>
