@@ -157,7 +157,7 @@ function writeBaseConfig() {
   // IMPORTANT: electron-store persists NESTED objects — the keys
   // 'copilot.settings' / 'common.adbDir' are dot-paths, not flat keys.
   const config = {
-    version: '3.10.1', // match app version so migrations keep our adbDir
+    version: '3.10.2', // match app version so migrations keep our adbDir
 
     // ── v3.8.0 scheduler probes ──
     // A task overdue by >24h must be SKIPPED with a recorded reason; a task
@@ -1110,6 +1110,17 @@ async function main() {
   }
   catch {}
   check('S12.3 keyboard mapping profile persists (save → load)', keymapOk, keymapSaved.slice(0, 180))
+
+  const mirrorDisplays = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('mirror:displays', { deviceId: 'E2ETEST001' })
+    return JSON.stringify(r)
+  })()`)
+  let displaysOk = false
+  try {
+    displaysOk = JSON.parse(mirrorDisplays)?.success === true
+  }
+  catch {}
+  check('S12.7 mirror:displays IPC responds (multi-display cooperation)', displaysOk, mirrorDisplays.slice(0, 120))
 
   const webMirrorStatus = await fetch(`http://127.0.0.1:${WEB_PORT}/api/mirror/status`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.json()).catch(() => null)
   check('S12.4 web /api/mirror/status responds', Boolean(webMirrorStatus?.success), JSON.stringify(webMirrorStatus)?.slice(0, 120))

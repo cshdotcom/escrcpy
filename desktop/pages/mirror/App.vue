@@ -4,6 +4,7 @@
     <div class="absolute top-0 inset-x-0 z-30 flex items-center gap-1 px-2 h-8 app-region-drag bg-gradient-to-b from-black/80 to-transparent">
       <span class="text-xs text-white/85 truncate max-w-40">{{ deviceName }}</span>
       <span class="text-[10px] text-white/40 truncate">{{ size.width }}×{{ size.height }}</span>
+      <span v-if="displayId" class="text-[10px] text-white/40 truncate">{{ displayLabel || `#${displayId}` }}</span>
       <span v-if="status === 'connected'" class="text-[10px] text-white/40">{{ stats.fps }} fps</span>
       <span v-if="audioEnabled" class="text-[10px] text-white/30">audio</span>
 
@@ -157,16 +158,21 @@ const deviceId = computed(() => currentDevice.value?.id || window.$preload?.payl
 const deviceName = computed(() => deviceStore.getLabel(currentDevice.value, ({ deviceName }) => deviceName))
 
 const audioEnabled = ref(true)
+const displayId = ref(Number(window.$preload?.payload?.query?.displayId ?? 0) || 0)
+const displayLabel = ref(window.$preload?.payload?.query?.displayLabel || '')
 const alwaysOnTop = ref(false)
 const panelVisible = ref(false)
 const workflows = ref([])
 
-const stream = useMirrorStream(deviceId, ref({
+const streamOptions = ref({
   maxSize: 1080,
   maxFps: 60,
   audio: true,
   audioCodec: 'opus',
-}))
+  displayId,
+})
+
+const stream = useMirrorStream(deviceId, streamOptions)
 
 const {
   status,

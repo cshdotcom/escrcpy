@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.10.2](https://github.com/cshdotcom/escrcpy-Next/compare/v3.10.1...v3.10.2) (2026-11-24)
+
+### Features
+
+* ✨ **多屏协同**：设备「更多」菜单新增「多屏协同」——枚举设备显示器（`scrcpy --list-displays` 解析 display-id 与分辨率），为每个显示器各开一个内嵌镜像窗口（最多 4 个），窗口标题标注显示器；单屏设备自动回退为主屏镜像。内嵌镜像窗口支持按 `displayId` 指定显示器
+
+### Test
+
+* ✅ 端到端检查增至 73 项（新增 `mirror:displays` 多屏枚举）
+
 ## [3.10.1](https://github.com/cshdotcom/escrcpy-Next/compare/v3.10.0...v3.10.1) (2026-11-24)
 
 ### Bug Fixes

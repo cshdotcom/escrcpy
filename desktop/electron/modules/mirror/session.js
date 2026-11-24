@@ -20,7 +20,7 @@ import net from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { getAdb } from '$electron/configs/which/index.js'
+import { getAdb, getScrcpy } from '$electron/configs/which/index.js'
 import { extraResolve } from '$electron/process/resources.js'
 import { setupEnvPath } from '$electron/process/helper.js'
 import { encodeControlMessage, FrameStreamParser } from './protocol.js'
@@ -471,6 +471,37 @@ export class MirrorSession {
       catch {}
     }
   }
+}
+
+/**
+ * List the device's displays (`scrcpy --list-displays`), so the UI can offer
+ * 多屏协同: one mirror window per display.
+ */
+export async function listDisplays(deviceId) {
+  setupEnvPath()
+  const scrcpy = getScrcpy()
+  if (!scrcpy)
+    return []
+  try {
+    const { stdout } = await execFile(scrcpy, ['--serial', deviceId, '--list-displays'], { timeout: 15000 })
+    return parseDisplays(stdout)
+  }
+  catch (error) {
+    console.warn('[Mirror] list displays failed:', error?.message ?? error)
+    return []
+  }
+}
+
+export function parseDisplays(text) {
+  const displays = []
+  for (const line of String(text || '').split('\n')) {
+    const match = line.match(/--display-id=(\d+)\s+\(([^)]+)\)/)
+    if (!match)
+      continue
+    const display = { id: Number.parseInt(match[1], 10), resolution: match[2] === 'size unknown' ? '' : match[2] }
+    displays.push(display)
+  }
+  return displays
 }
 
 export function getServerVersion() {

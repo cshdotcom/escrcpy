@@ -12,7 +12,7 @@
 import { BrowserWindow } from 'electron'
 import { ipcxMain } from '@escrcpy/electron-ipcx/main'
 import electronStore from '$electron/helpers/store/index.js'
-import { MirrorSession, serverJarPath } from './session.js'
+import { listDisplays, MirrorSession, serverJarPath } from './session.js'
 import { ANDROID_KEYCODE, META_STATE } from './protocol.js'
 
 const sessions = new Map()
@@ -384,6 +384,15 @@ export default {
             return { success: command(deviceId, message.command, message) }
           default:
             return { success: false, error: { code: 'MIRROR_CONTROL', message: `Unknown control kind: ${message.kind}` } }
+        }
+      },
+
+      'mirror:displays': async (_event, payload) => {
+        try {
+          return { success: true, displays: await listDisplays(String(payload?.deviceId || '')) }
+        }
+        catch (error) {
+          return { success: false, error: { code: 'MIRROR_DISPLAYS', message: error?.message ?? String(error) } }
         }
       },
 
