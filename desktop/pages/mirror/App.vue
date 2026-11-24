@@ -169,7 +169,7 @@ const streamOptions = ref({
   maxFps: 60,
   audio: true,
   audioCodec: 'opus',
-  displayId,
+  displayId: displayId.value,
 })
 
 const stream = useMirrorStream(deviceId, streamOptions)
