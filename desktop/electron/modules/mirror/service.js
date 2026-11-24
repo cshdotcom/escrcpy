@@ -168,7 +168,7 @@ function touch(deviceId, payload) {
   const y = payload.normalized ? Math.round((Number(payload.y) || 0) * height) : Math.round(Number(payload.y) || 0)
   return entry.session.sendControl({
     type: 2,
-    action: payload.action === 'up' ? 1 : 0,
+    action: payload.action,
     pointerId: payload.pointerId ?? -1,
     x,
     y,

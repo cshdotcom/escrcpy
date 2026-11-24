@@ -30,7 +30,7 @@ fs.mkdirSync(SAVE, { recursive: true })
 fs.mkdirSync(OUT, { recursive: true })
 
 fs.writeFileSync(CONFIG_JSON, JSON.stringify({
-  version: '3.10.0',
+  version: '3.10.1',
   common: { adbDir: path.join(__dirname, 'fake-adb-bin'), scrcpyDir: path.join(__dirname, 'fake-adb-bin'), saveDir: SAVE },
   copilot: { settings: {} },
 }, null, 2))

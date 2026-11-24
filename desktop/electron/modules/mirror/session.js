@@ -414,7 +414,8 @@ export class MirrorSession {
     await this.pushServer()
     await this.startServer()
     await this.startVideo()
-    await this.startAudio()
+    if (this.options.audio !== false)
+      await this.startAudio()
     await this.startControl()
     return {
       ok: true,

@@ -1,5 +1,5 @@
 <template>
-  <div class="relative w-full h-full bg-black overflow-hidden select-none" @contextmenu.prevent="handleContextMenu">
+  <div class="relative w-full h-full bg-black overflow-hidden select-none">
     <!-- Header -->
     <div class="absolute top-0 inset-x-0 z-30 flex items-center gap-1 px-2 h-8 app-region-drag bg-gradient-to-b from-black/80 to-transparent">
       <span class="text-xs text-white/85 truncate max-w-40">{{ deviceName }}</span>
@@ -49,6 +49,7 @@
         @pointerup="handlePointerUp"
         @pointercancel="handlePointerUp"
         @wheel.prevent="handleWheel"
+        @contextmenu.prevent="handleContextMenu"
       >
         <video
           v-show="stream.mode.value === 'video'"

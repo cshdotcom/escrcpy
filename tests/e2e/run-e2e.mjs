@@ -157,7 +157,7 @@ function writeBaseConfig() {
   // IMPORTANT: electron-store persists NESTED objects — the keys
   // 'copilot.settings' / 'common.adbDir' are dot-paths, not flat keys.
   const config = {
-    version: '3.10.0', // match app version so migrations keep our adbDir
+    version: '3.10.1', // match app version so migrations keep our adbDir
 
     // ── v3.8.0 scheduler probes ──
     // A task overdue by >24h must be SKIPPED with a recorded reason; a task

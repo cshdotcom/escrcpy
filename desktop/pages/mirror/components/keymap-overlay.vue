@@ -3,7 +3,6 @@
     ref="containerRef"
     class="absolute inset-0 z-10"
     :class="mode === 'edit' ? 'pointer-events-auto' : 'pointer-events-none'"
-    @contextmenu.prevent="handleContextMenu"
   />
 </template>
 
@@ -237,18 +236,6 @@ function drawRegion(mapping, width, height, editing) {
 
   if (props.selectedId === mapping.id)
     transformer.nodes([group])
-}
-
-function handleContextMenu(event) {
-  if (props.mode !== 'edit')
-    return
-  const rect = containerRef.value?.getBoundingClientRect()
-  if (!rect)
-    return
-  emit('add', {
-    x: (event.clientX - rect.left) / rect.width,
-    y: (event.clientY - rect.top) / rect.height,
-  })
 }
 
 onMounted(() => {

@@ -50,6 +50,14 @@ export const META_STATE = {
   ScrollLock: 4194304,
 }
 
+const TOUCH_ACTIONS = { down: 0, up: 1, move: 2, cancel: 3 }
+
+function touchAction(action) {
+  if (typeof action === 'number')
+    return action
+  return TOUCH_ACTIONS[String(action).toLowerCase()] ?? 0
+}
+
 function encodePressure(value) {
   const pressure = Math.max(-1, Math.min(1, Number(value) || 0))
   return pressure === 1 ? 65535 : Math.round(pressure * 65536)
@@ -86,10 +94,7 @@ export function encodeControlMessage(message) {
       // InjectTouchEvent
       const buffer = Buffer.alloc(32)
       buffer.writeUInt8(2, 0)
-      buffer.writeUInt8(
-        message.action === 'up' || message.action === 1 ? 1 : 0,
-        1,
-      )
+      buffer.writeUInt8(touchAction(message.action), 1)
       buffer.writeBigInt64BE(BigInt(message.pointerId ?? -1), 2)
       buffer.writeUInt32BE(Math.max(0, Number(message.x) || 0), 10)
       buffer.writeUInt32BE(Math.max(0, Number(message.y) || 0), 14)
