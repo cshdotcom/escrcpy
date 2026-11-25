@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.11.0](https://github.com/cshdotcom/escrcpy-Next/compare/v3.10.2...v3.11.0) (2026-11-25)
+
+### Documentation
+
+* 📝 **v3.11.0 基线核验报告**（docs/dev/parity-report-v3.11.0.md）：官方 v3.3.1 付费闭源功能全量对照——官方能力 → 我们现状 → 证据，逐项差距确认
+* 📝 任务规格与进度追踪入库（docs/dev/parity-plan.md / parity-progress.md），所有后续会话以仓库内规格为准推进
+
+### Test
+
+* ✅ 基线独立复跑（不采信既有声明）：`turbo build` 6/6 零错误、图标门禁 88/88、单元测试 14/14、端到端 **73/73**（S1–S13 全场景）
+* ✅ 文案落地率核验（hyphen-aware）：automation 170/30 引用、mirror 31/5、device.control 128/114，未引用清单已入报告作为 v3.11.1+ 工作清单
+
 ## [3.10.2](https://github.com/cshdotcom/escrcpy-Next/compare/v3.10.1...v3.10.2) (2026-11-24)
 
 ### Features
