@@ -1420,6 +1420,147 @@ async function main() {
   const automationPageBuilt = fs.existsSync(path.join(REPO, 'desktop/dist/pages/automation/index.html'))
   check('S14.11 automation page registered in vite build (dist artifact exists)', automationPageBuilt, 'desktop/dist/pages/automation/index.html')
 
+  // ════════ S15 · v3.11.2: P0-B step types (install / record / force-stop / loop / condition) ════════
+  console.log('\n[S15] P0-B step types (install / record / launch force-stop / loop / condition)')
+
+  // a fake APK to install
+  fs.writeFileSync('/tmp/e2e-automation/fake.apk', Buffer.from('PK-e2e-fake-apk-payload'))
+
+  // phase A: capture a template screenshot through the workbench engine
+  const templateScriptRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: {
+      id: '', deviceId: 'E2ETEST001', name: 'S15 template probe', variables: [],
+      steps: [{ id: 'tpl_shot', type: 'screenshot', name: 'shot', saveDir: '${AUTOMATION_SAVE_DIR}' }],
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let templateScriptId = ''
+  try {
+    templateScriptId = JSON.parse(templateScriptRes)?.script?.id || ''
+  }
+  catch {}
+  let s15TemplatePath = ''
+  try {
+    await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(templateScriptId)}, mode: 'all' })
+      return JSON.stringify(r)
+    })()`)
+    await waitFor(async () => {
+      const res = JSON.parse(await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(templateScriptId)} })
+        return JSON.stringify(r)
+      })()`))
+      return res?.run?.state === 'idle'
+    }, { timeoutMs: 15000, label: 'S15 template run' })
+    const tplLogs = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:logs', { scriptId: ${JSON.stringify(templateScriptId)}, since: 0 })
+      return JSON.stringify(r)
+    })()`))
+    const entry = (tplLogs?.logs || []).find(l => String(l.text).includes('screenshot saved: '))
+    s15TemplatePath = String(entry?.text || '').match(/screenshot saved: (\S+)/)?.[1]?.trim() || ''
+  }
+  catch {}
+  check('S15.1 template screenshot captured via workbench engine', Boolean(s15TemplatePath), s15TemplatePath.slice(-60))
+
+  // phase B: one script exercising every P0-B step type
+  const p0bScriptRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: {
+      id: '', deviceId: 'E2ETEST001', name: 'S15 P0-B all types', variables: [],
+      steps: [
+        { id: 'p_install', type: 'install', name: 'install', apkPath: '/tmp/e2e-automation/fake.apk', uninstallBefore: true, package: 'com.example.e2e' },
+        { id: 'p_record', type: 'record', name: 'record', duration: 1, saveDir: '${AUTOMATION_SAVE_DIR}' },
+        { id: 'p_launch', type: 'open_app', name: 'launch', package: 'com.android.settings', forceStop: true },
+        { id: 'p_loop', type: 'loop', name: 'repeat', loopCount: 2, steps: [
+          { id: 'p_loop_tap', type: 'tap', name: 'loop-tap', x: 777, y: 888 },
+        ] },
+        { id: 'p_cond_online', type: 'condition', name: 'if-online', conditionType: 'device_online', steps: [
+          { id: 'p_cond_tap', type: 'tap', name: 'online-tap', x: 55, y: 66 },
+        ] },
+        { id: 'p_cond_var', type: 'condition', name: 'if-var', conditionType: 'variable_compare', varName: 'missing', varOp: '==', varValue: 'nope', steps: [
+          { id: 'p_var_tap', type: 'tap', name: 'var-tap', x: 66, y: 77 },
+        ] },
+        { id: 'p_cond_img', type: 'condition', name: 'if-image', conditionType: 'image_exists', templatePath: ${JSON.stringify(s15TemplatePath)}, threshold: 0.9, steps: [
+          { id: 'p_img_tap', type: 'tap', name: 'image-tap', x: 333, y: 444 },
+        ] },
+      ],
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let p0bScriptId = ''
+  let p0bSaved = false
+  try {
+    const parsed = JSON.parse(p0bScriptRes)
+    p0bScriptId = parsed?.script?.id || ''
+    p0bSaved = Boolean(parsed?.success && p0bScriptId && parsed.script.steps.length === 7)
+  }
+  catch {}
+  check('S15.2 script with all P0-B step types saves', p0bSaved, p0bScriptRes.slice(0, 160))
+
+  let p0bRunOk = false
+  let p0bRunDetail = ''
+  try {
+    const started = await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(p0bScriptId)}, mode: 'all' })
+      return JSON.stringify(r)
+    })()`)
+    p0bRunOk = JSON.parse(started)?.success === true
+    await waitFor(async () => {
+      const res = JSON.parse(await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(p0bScriptId)} })
+        return JSON.stringify(r)
+      })()`))
+      return res?.run?.state === 'idle' || res?.run?.state === 'stopped'
+    }, { timeoutMs: 30000, label: 'S15 P0-B run' })
+    const p0bLogs = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:logs', { scriptId: ${JSON.stringify(p0bScriptId)}, since: 0 })
+      return JSON.stringify(r)
+    })()`))
+    const texts = (p0bLogs?.logs || []).map(l => String(l.text))
+    p0bRunOk = p0bRunOk && texts.some(t => t.includes('run done'))
+    p0bRunDetail = texts.slice(-8).map(t => t.slice(0, 60)).join(' | ')
+  }
+  catch (error) {
+    p0bRunDetail = error?.message ?? String(error)
+  }
+  check('S15.3 P0-B script run completes', p0bRunOk, p0bRunDetail)
+
+  const { calls: p0bCalls } = await ctrl(ADB_CTRL, 'GET', '/calls')
+  const serialCalls = p0bCalls.filter(c => c.serial === 'E2ETEST001')
+  const commands = serialCalls.map(c => String(c.command))
+
+  // install: uninstall first, push (sync), pm install -r
+  const sawUninstall = commands.some(c => c.includes('pm uninstall com.example.e2e'))
+  const sawPmInstall = commands.some(c => c.includes('pm install -r /data/local/tmp/escrcpy-install'))
+  check('S15.4 install step runs uninstall-then-install', sawUninstall && sawPmInstall,
+    `uninstall=${sawUninstall} install=${sawPmInstall}`)
+
+  // record: screenrecord + pulled .mp4 artifact on host
+  const sawScreenrecord = commands.some(c => c.includes('screenrecord --time-limit 1 /sdcard/escrcpy-record'))
+  const mp4Files = fs.existsSync(AUTOMATION_SAVE_DIR)
+    ? fs.readdirSync(AUTOMATION_SAVE_DIR).filter(f => f.endsWith('.mp4')) : []
+  check('S15.5 record step records and pulls the mp4', sawScreenrecord && mp4Files.length > 0,
+    `screenrecord=${sawScreenrecord} mp4=${mp4Files.join(',')}`)
+
+  // launch force-stop: am force-stop precedes the monkey launch
+  const forceStopIndex = commands.findIndex(c => c.includes('am force-stop com.android.settings'))
+  const monkeyAfterIndex = forceStopIndex >= 0
+    ? commands.findIndex((c, i) => i > forceStopIndex && c.includes('monkey -p com.android.settings'))
+    : -1
+  check('S15.6 launch step force-stops before monkey', forceStopIndex >= 0 && monkeyAfterIndex > forceStopIndex,
+    `forceStop@${forceStopIndex} monkey@${monkeyAfterIndex}`)
+
+  // loop: child tap executes exactly loopCount times
+  const loopTaps = commands.filter(c => c.includes('777 888')).length
+  check('S15.7 loop runs its child step loopCount times', loopTaps === 2, `loop taps=${loopTaps}`)
+
+  // conditions: online guard passes, variable guard skips, image guard passes
+  const onlineTap = commands.filter(c => c.includes('55 66')).length
+  const varTap = commands.filter(c => c.includes('66 77')).length
+  const imageTap = commands.filter(c => c.includes('333 444')).length
+  check('S15.8 conditions gate children correctly (online pass / variable skip / image pass)',
+    onlineTap >= 1 && varTap === 0 && imageTap >= 1,
+    `online=${onlineTap} variable=${varTap} image=${imageTap}`)
+
   // teardown
   main.close(); main2.close(); copilot.close(); copilot2.close()
   console.log(`\n== ${results.filter(r => r.ok).length}/${results.length} checks passed ==`)

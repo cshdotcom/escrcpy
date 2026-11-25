@@ -12,12 +12,12 @@ export const STEP_GROUPS = [
   {
     key: 'basic',
     labelKey: 'automation.step.group.basic',
-    types: ['tap', 'swipe', 'input_text', 'key', 'wait', 'open_app', 'screenshot', 'shell'],
+    types: ['tap', 'swipe', 'input_text', 'key', 'wait', 'open_app', 'install', 'record', 'screenshot', 'shell'],
   },
   {
     key: 'conditional',
     labelKey: 'automation.step.group.conditional',
-    types: ['match_image', 'wait_image'],
+    types: ['loop', 'condition', 'match_image', 'wait_image'],
   },
   {
     key: 'extended',
@@ -85,8 +85,32 @@ export const STEP_META = {
   open_app: {
     labelKey: 'automation.step.type.open_app',
     icon: 'i-solar-rocket-linear',
-    defaults: () => stepBase('open_app', { package: '' }),
-    fields: ['package'],
+    defaults: () => stepBase('open_app', { package: '', forceStop: false }),
+    fields: ['package', 'forceStop'],
+  },
+  install: {
+    labelKey: 'automation.step.type.install',
+    icon: 'i-solar-download-square-linear',
+    defaults: () => stepBase('install', { apkPath: '', uninstallBefore: false, package: '' }),
+    fields: ['apkPath', 'uninstallBefore', 'package'],
+  },
+  record: {
+    labelKey: 'automation.step.type.record',
+    icon: 'i-solar-video-library-linear',
+    defaults: () => stepBase('record', { duration: 10, saveDir: '' }),
+    fields: ['duration', 'saveDir'],
+  },
+  loop: {
+    labelKey: 'automation.step.type.loop',
+    icon: 'i-solar-repeat-linear',
+    defaults: () => stepBase('loop', { steps: [] }),
+    fields: [],
+  },
+  condition: {
+    labelKey: 'automation.step.type.condition',
+    icon: 'i-solar-routing-2-linear',
+    defaults: () => stepBase('condition', { conditionType: 'device_online', steps: [], templatePath: '', threshold: 0.8, varName: '', varOp: '==', varValue: '' }),
+    fields: ['conditionType'],
   },
   screenshot: {
     labelKey: 'automation.step.type.screenshot',
@@ -125,6 +149,22 @@ export const STEP_META = {
     fields: ['title', 'content'],
   },
 }
+
+/** Steps that carry child steps (nested execution containers). */
+export const CONTAINER_TYPES = new Set(['loop', 'condition'])
+
+export function isContainer(type) {
+  return CONTAINER_TYPES.has(type)
+}
+
+/** Condition guard types offered in the condition step form. */
+export const CONDITION_TYPES = [
+  { value: 'device_online', labelKey: 'automation.step.conditionType.device_online' },
+  { value: 'image_exists', labelKey: 'automation.step.conditionType.image_exists' },
+  { value: 'variable_compare', labelKey: 'automation.step.conditionType.variable_compare' },
+]
+
+export const COMPARE_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains']
 
 /** Official built-in script templates (P1-C ships richer ones). */
 export const SCRIPT_TEMPLATES = []

@@ -113,17 +113,17 @@
         <!-- Step list -->
         <el-scrollbar class="flex-1 min-h-0 px-3">
           <template v-if="scriptId">
-            <div
-              v-for="(step, index) in steps"
-              :key="step.id"
-              class="group flex items-center gap-2 px-2.5 py-2 mb-1.5 rounded-lg border cursor-pointer transition-colors"
-              :class="stepClasses(step)"
-              draggable="true"
-              @click="selectedStepId = step.id"
-              @dragstart="onDragStart(index)"
-              @dragover.prevent="onDragOver(index)"
-              @drop.prevent="onDrop(index)"
-            >
+            <template v-for="(step, index) in steps" :key="step.id">
+              <div
+                class="group flex items-center gap-2 px-2.5 py-2 mb-1.5 rounded-lg border cursor-pointer transition-colors"
+                :class="stepClasses(step)"
+                :style="isContainer(step.type) ? '' : ''"
+                draggable="true"
+                @click="selectedStepId = step.id"
+                @dragstart="onDragStart(index)"
+                @dragover.prevent="onDragOver(index)"
+                @drop.prevent="onDrop(index)"
+              >
               <el-checkbox v-model="stepChecked[step.id]" size="small" @click.stop @change="onCheckChange" />
               <i :class="stepIcon(step.type)" class="text-base flex-none" />
               <span class="text-xs font-mono w-6 text-gray-400 flex-none">{{ index + 1 }}</span>
@@ -135,10 +135,11 @@
                   {{ stepSummary(step) }}
                 </div>
               </div>
+              <span v-if="isContainer(step.type)" class="text-[10px] text-gray-400 flex-none font-mono">{{ (step.steps || []).length }} ⊂ ×{{ step.loopCount }}</span>
               <span v-if="runState.scriptId === scriptId && runState.state === 'running' && runState.stepIds?.includes(step.id) && runState.currentStepIndex === steps.indexOf(step)" class="flex-none">
                 <i class="i-solar-play-circle-linear text-primary-500 animate-pulse" />
               </span>
-              <el-tag v-if="step.loopCount > 1" size="small" type="info" class="!m-0 flex-none">
+              <el-tag v-if="!isContainer(step.type) && step.loopCount > 1" size="small" type="info" class="!m-0 flex-none">
                 ×{{ step.loopCount }}
               </el-tag>
               <el-tag v-if="step.delayBefore > 0" size="small" type="info" class="!m-0 flex-none">
@@ -161,7 +162,38 @@
                   <i class="i-solar-trash-bin-trash-linear" />
                 </el-button>
               </div>
-            </div>
+              </div>
+              <!-- child steps of loop / condition containers -->
+              <div
+                v-for="(child, childIndex) in (step.steps || [])"
+                :key="child.id"
+                class="group flex items-center gap-2 ml-6 pl-6 pr-2.5 py-1.5 mb-1 rounded-lg border border-dashed cursor-pointer transition-colors"
+                :class="stepClasses(child)"
+                @click="selectedStepId = child.id"
+              >
+                <i :class="stepIcon(child.type)" class="text-sm flex-none" />
+                <span class="text-[10px] font-mono w-8 text-gray-400 flex-none">{{ index + 1 }}.{{ childIndex + 1 }}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium truncate">{{ child.name || $t(stepLabelKey(child.type)) }}</div>
+                  <div class="text-[10px] text-gray-400 truncate font-mono">{{ stepSummary(child) }}</div>
+                </div>
+                <el-tag v-if="child.loopCount > 1" size="small" type="info" class="!m-0 flex-none">×{{ child.loopCount }}</el-tag>
+                <div class="flex-none flex gap-0.5 opacity-0 group-hover:opacity-100">
+                  <el-button size="small" text :disabled="childIndex === 0" @click.stop="moveChild(step, childIndex, -1)">
+                    <i class="i-solar-alt-arrow-up-linear" />
+                  </el-button>
+                  <el-button size="small" text :disabled="childIndex === (step.steps || []).length - 1" @click.stop="moveChild(step, childIndex, 1)">
+                    <i class="i-solar-alt-arrow-down-linear" />
+                  </el-button>
+                  <el-button size="small" text @click.stop="duplicateChild(step, childIndex)">
+                    <i class="i-solar-copy-linear" />
+                  </el-button>
+                  <el-button size="small" text type="danger" @click.stop="removeChild(step, childIndex)">
+                    <i class="i-solar-trash-bin-trash-linear" />
+                  </el-button>
+                </div>
+              </div>
+            </template>
             <div v-if="!steps.length" class="py-10 text-center text-xs text-gray-400">
               {{ $t('automation.step.selectHint') }}
             </div>
@@ -213,20 +245,68 @@
                 </el-select>
               </el-form-item>
 
+              <!-- containers carry their loop count at the top level -->
+              <el-form-item v-if="isContainer(currentStep.type)" :label="$t('automation.step.loopCount')">
+                <el-input-number v-model="currentStep.loopCount" :min="1" :max="999" class="!w-full" controls-position="right" />
+              </el-form-item>
+
               <!-- type-specific fields -->
               <template v-for="field in typeFields" :key="field">
                 <el-form-item :label="fieldLabel(field)">
-                  <el-input-number v-if="isNumberField(field)" v-model="currentStep[field]" :min="0" class="!w-full" controls-position="right" />
+                  <div v-if="field === 'apkPath'" class="flex gap-1 w-full">
+                    <el-input v-model="currentStep.apkPath" :placeholder="$t('automation.step.install.apkPath.placeholder')" />
+                    <el-button size="small" @click="pickApk">
+                      <i class="i-solar-download-square-linear" />
+                    </el-button>
+                  </div>
+                  <el-switch v-else-if="field === 'uninstallBefore' || field === 'forceStop'" v-model="currentStep[field]" />
+                  <el-select v-else-if="field === 'conditionType'" v-model="currentStep.conditionType">
+                    <el-option v-for="ct in CONDITION_TYPES" :key="ct.value" :label="$t(ct.labelKey)" :value="ct.value" />
+                  </el-select>
                   <el-select v-else-if="field === 'method'" v-model="currentStep.method">
                     <el-option v-for="method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']" :key="method" :label="method" :value="method" />
                   </el-select>
                   <el-switch v-else-if="field === 'required'" v-model="currentStep.required" />
+                  <el-input-number v-else-if="isNumberField(field)" v-model="currentStep[field]" :min="0" class="!w-full" controls-position="right" />
                   <el-input v-else-if="isLongField(field)" v-model="currentStep[field]" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" :placeholder="fieldPlaceholder(field)" />
                   <el-input v-else v-model="currentStep[field]" :placeholder="fieldPlaceholder(field)" />
                 </el-form-item>
+                <div v-if="field === 'apkPath' && currentStep.uninstallBefore" class="text-[10px] text-gray-400 -mt-2 mb-2">
+                  {{ $t('automation.step.install.uninstallBefore') }} → package
+                </div>
                 <div v-if="field === 'command'" class="text-[10px] text-gray-400 -mt-2 mb-2">
                   {{ $t('automation.step.command.hint') }}
                 </div>
+              </template>
+
+              <!-- condition sub-fields per guard type -->
+              <template v-if="currentStep.type === 'condition'">
+                <template v-if="currentStep.conditionType === 'image_exists'">
+                  <el-form-item :label="$t('automation.step.imageMatch.selectTemplate')">
+                    <div class="flex gap-1 w-full">
+                      <el-input v-model="currentStep.templatePath" />
+                      <el-button size="small" @click="pickTemplate">
+                        <i class="i-solar-gallery-linear" />
+                      </el-button>
+                    </div>
+                  </el-form-item>
+                  <el-form-item :label="$t('automation.step.imageMatch.threshold')">
+                    <el-input-number v-model="currentStep.threshold" :min="0.1" :max="1" :step="0.05" class="!w-full" controls-position="right" />
+                  </el-form-item>
+                </template>
+                <template v-else-if="currentStep.conditionType === 'variable_compare'">
+                  <el-form-item :label="$t('automation.magic.varName')">
+                    <el-input v-model="currentStep.varName" :placeholder="$t('automation.magic.namePlaceholder')" />
+                  </el-form-item>
+                  <el-form-item :label="$t('automation.step.varOp')">
+                    <el-select v-model="currentStep.varOp">
+                      <el-option v-for="op in COMPARE_OPS" :key="op" :label="op" :value="op" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item :label="$t('automation.step.varValue')">
+                    <el-input v-model="currentStep.varValue" :placeholder="$t('automation.magic.valuePlaceholder')" />
+                  </el-form-item>
+                </template>
               </template>
 
               <!-- key presets -->
@@ -266,6 +346,45 @@
               </template>
 
               <!-- advanced common fields -->
+              <!-- children management (loop / condition) -->
+              <template v-if="isContainer(currentStep.type)">
+                <el-divider class="!my-3">
+                  <span class="text-xs">{{ $t('automation.step.loopChildren') }}</span>
+                </el-divider>
+                <div
+                  v-for="(child, childIndex) in currentStep.steps"
+                  :key="child.id"
+                  class="group flex items-center gap-2 px-2 py-1.5 mb-1 rounded border border-dashed cursor-pointer transition-colors"
+                  :class="child.id === selectedStepId ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-primary-300'"
+                  @click="selectedStepId = child.id"
+                >
+                  <i :class="stepIcon(child.type)" class="text-sm flex-none" />
+                  <span class="text-xs flex-1 min-w-0 truncate">{{ child.name || $t(stepLabelKey(child.type)) }}</span>
+                  <span class="text-[10px] text-gray-400 font-mono flex-none max-w-24 truncate">{{ stepSummary(child) }}</span>
+                  <div class="flex-none flex gap-0.5 opacity-0 group-hover:opacity-100">
+                    <el-button size="small" text :disabled="childIndex === 0" @click.stop="moveChild(currentStep, childIndex, -1)">
+                      <i class="i-solar-alt-arrow-up-linear" />
+                    </el-button>
+                    <el-button size="small" text :disabled="childIndex === currentStep.steps.length - 1" @click.stop="moveChild(currentStep, childIndex, 1)">
+                      <i class="i-solar-alt-arrow-down-linear" />
+                    </el-button>
+                    <el-button size="small" text @click.stop="duplicateChild(currentStep, childIndex)">
+                      <i class="i-solar-copy-linear" />
+                    </el-button>
+                    <el-button size="small" text type="danger" @click.stop="removeChild(currentStep, childIndex)">
+                      <i class="i-solar-trash-bin-trash-linear" />
+                    </el-button>
+                  </div>
+                </div>
+                <div v-if="!currentStep.steps.length" class="text-[10px] text-gray-400 mb-2 text-center py-3">
+                  {{ $t('automation.step.selectHint') }}
+                </div>
+                <el-button size="small" class="w-full" @click="addChildStep(currentStep)">
+                  <i class="i-solar-add-circle-linear mr-1" />
+                  {{ $t('automation.step.addChild') }}
+                </el-button>
+              </template>
+
               <el-collapse class="mt-2">
                 <el-collapse-item :title="$t('automation.step.advanced')" name="advanced">
                   <el-form-item :label="$t('automation.step.delayBefore')">
@@ -300,7 +419,7 @@
 </template>
 
 <script setup>
-import { STEP_GROUPS, STEP_META, KEY_PRESETS, stepIcon, stepLabelKey, defaultStep, uid } from './configs/index.js'
+import { STEP_GROUPS, STEP_META, KEY_PRESETS, CONDITION_TYPES, COMPARE_OPS, isContainer, stepIcon, stepLabelKey, defaultStep, uid } from './configs/index.js'
 
 const { t } = useI18n()
 
@@ -365,7 +484,6 @@ const imageMatchFollow = computed({
 
 const NUMBER_FIELDS = new Set(['x', 'y', 'x1', 'y1', 'x2', 'y2', 'duration', 'waitMs', 'keyCode', 'threshold', 'timeoutMs', 'intervalMs', 'delayBefore', 'loopCount', 'randomRange'])
 const LONG_FIELDS = new Set(['text', 'command', 'headers', 'body', 'content'])
-
 function isNumberField(field) {
   return NUMBER_FIELDS.has(field)
 }
@@ -373,15 +491,17 @@ function isLongField(field) {
   return LONG_FIELDS.has(field)
 }
 function fieldLabel(field) {
-  const key = `automation.step.field.${field}`
   const fallback = {
     x: 'X', y: 'Y', x1: 'startX', y1: 'startY', x2: 'endX', y2: 'endY',
-    duration: 'duration', waitMs: 'automation.step.waitDuration', text: 'automation.step.text',
+    duration: 'automation.step.record.duration', waitMs: 'automation.step.waitDuration', text: 'automation.step.text',
     keyCode: 'key', package: 'package', saveDir: 'automation.step.saveDir',
     command: 'automation.step.command', templatePath: 'automation.step.imageMatch.selectTemplate',
     threshold: 'automation.step.imageMatch.threshold', required: 'required',
     timeoutMs: 'timeout', intervalMs: 'interval', url: 'URL', method: 'method',
     headers: 'headers', body: 'body', title: 'title', content: 'content',
+    apkPath: 'automation.step.install.apkPath', uninstallBefore: 'automation.step.install.uninstallBefore',
+    forceStop: 'automation.step.launch.forceStop', conditionType: 'automation.step.conditionType',
+    varOp: 'automation.step.varOp',
   }[field] || field
   if (fallback.startsWith('automation.'))
     return t(fallback)
@@ -415,7 +535,11 @@ function stepSummary(step) {
     case 'input_text': return String(step.text || '').slice(0, 24)
     case 'key': return `keycode ${step.keyCode}`
     case 'wait': return `${step.waitMs}ms`
-    case 'open_app': return String(step.package || '')
+    case 'open_app': return `${step.forceStop ? 'force-stop+' : ''}${String(step.package || '')}`
+    case 'install': return `${step.uninstallBefore ? 'uninstall+' : ''}${String(step.apkPath || '').split(/[\\/]/).pop()}`
+    case 'record': return `${step.duration}s -> ${String(step.saveDir || '').split(/[\\/]/).pop()}`
+    case 'loop': return `×${step.loopCount}`
+    case 'condition': return String(step.conditionType || 'device_online')
     case 'screenshot': return String(step.saveDir || '').slice(-32)
     case 'shell': return String(step.command || '').slice(0, 32)
     case 'match_image': case 'wait_image': return String(step.templatePath || '').split(/[\\/]/).pop()
@@ -489,8 +613,16 @@ function resetEditor() {
 
 // Steps persisted in the store may carry `target: undefined` after main-process
 // normalization — always hydrate so the form can bind step.target.by safely.
+// Containers hydrate their children recursively.
 function hydrateSteps(rawSteps) {
-  return (rawSteps || []).map(step => ({ ...step, target: step.target || { by: '', value: '' } }))
+  return (rawSteps || []).map((step) => {
+    const hydrated = { ...step, target: step.target || { by: '', value: '' } }
+    if (isContainer(hydrated.type))
+      hydrated.steps = hydrateSteps(hydrated.steps)
+    else if (hydrated.steps !== undefined)
+      delete hydrated.steps
+    return hydrated
+  })
 }
 
 async function selectScript(id) {
@@ -668,6 +800,39 @@ function onTypeChange(type) {
   const fresh = defaultStep(type)
   const keep = { id: step.id, name: step.name, delayBefore: step.delayBefore, loopCount: step.loopCount, randomRange: step.randomRange, target: step.target || { by: '', value: '' }, imageMatch: step.imageMatch }
   Object.assign(step, fresh, keep)
+  if (isContainer(type))
+    step.steps = Array.isArray(step.steps) ? step.steps : []
+  else
+    delete step.steps
+}
+
+// ── child steps (loop / condition containers) ────────────
+
+function addChildStep(container) {
+  container.steps = Array.isArray(container.steps) ? container.steps : []
+  const step = defaultStep('tap')
+  container.steps.push(step)
+  selectedStepId.value = step.id
+}
+
+function moveChild(container, index, direction) {
+  const target = index + direction
+  if (target < 0 || target >= container.steps.length)
+    return
+  const [child] = container.steps.splice(index, 1)
+  container.steps.splice(target, 0, child)
+}
+
+function duplicateChild(container, index) {
+  const copy = { ...structuredClone(toRaw(container.steps[index])), id: uid('step'), target: container.steps[index]?.target || { by: '', value: '' } }
+  container.steps.splice(index + 1, 0, copy)
+  selectedStepId.value = copy.id
+}
+
+function removeChild(container, index) {
+  const [removed] = container.steps.splice(index, 1)
+  if (removed?.id === selectedStepId.value)
+    selectedStepId.value = container.steps[Math.min(index, container.steps.length - 1)]?.id || ''
 }
 
 function onCheckChange() { /* checkbox state lives in stepChecked */ }
@@ -696,6 +861,12 @@ async function pickTemplate() {
   const result = await invoke('automation:pick-template')
   if (result?.success && result.filePath)
     imageMatchTemplate.value = result.filePath
+}
+
+async function pickApk() {
+  const result = await invoke('automation:pick-apk')
+  if (result?.success && result.filePath && currentStep.value)
+    currentStep.value.apkPath = result.filePath
 }
 
 // ── execution control ─────────────────────────────────────

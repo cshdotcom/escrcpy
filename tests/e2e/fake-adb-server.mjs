@@ -243,6 +243,14 @@ function shellAnswer(serial, command) {
     return `  mCurrentFocus=Window{e2e1 ${state.focusedApp}}`
   if (cmd.startsWith('input '))
     return '' // tap/swipe/key — silent success
+  if (cmd.startsWith('am force-stop'))
+    return ''
+  if (cmd.startsWith('screenrecord'))
+    return ''
+  if (cmd.startsWith('pm install'))
+    return 'Success'
+  if (cmd.startsWith('pm uninstall'))
+    return 'Success'
   if (cmd.startsWith('am start'))
     return 'Starting: Intent { cmp=android/com.android.internal.app.ResolverActivity }'
   if (cmd.startsWith('monkey '))
@@ -427,6 +435,24 @@ const adbServer = net.createServer((socket) => {
         return
       const data = buffer.subarray(8, 8 + len)
       buffer = buffer.subarray(8 + len)
+
+      // RECV:<path> — a pull request (adbkit Sync.pull). Stream fake payload
+      // bytes as one DATA frame, then DONE to finish, so record-step pulls
+      // and any /sdcard reads succeed end-to-end in e2e.
+      if (cmd === 'RECV') {
+        const payload = Buffer.from('FAKE-ADB-PULL-PAYLOAD')
+        const dataFrame = Buffer.alloc(8 + payload.length)
+        dataFrame.write('DATA', 0, 'ascii')
+        dataFrame.writeUInt32LE(payload.length, 4)
+        payload.copy(dataFrame, 8)
+        const doneFrame = Buffer.alloc(8)
+        doneFrame.write('DONE', 0, 'ascii')
+        doneFrame.writeUInt32LE(0, 4)
+        socket.write(Buffer.concat([dataFrame, doneFrame]))
+        socket.end()
+        mode = 'transported'
+        return
+      }
 
       if (cmd === 'SEND') {
         // path,mode — a push begins; wait for DATA/DONE frames

@@ -1,7 +1,7 @@
 {
   "name": "@escrcpy/shared",
   "type": "module",
-  "version": "3.11.1",
+  "version": "3.11.2",
   "private": true,
   "exports": {
     ".": "./dist/index.mjs",

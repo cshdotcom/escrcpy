@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.11.2](https://github.com/cshdotcom/escrcpy-Next/compare/v3.11.1...v3.11.2) (2026-11-25)
+
+### Features
+
+* ✨ **install 安装步骤**（P0-B，官方对齐）：APK 路径选择对话框 + 可选「安装前先卸载」——pm uninstall（忽略失败）→ adbkit sync push → `pm install -r` → 远端清理；安装失败识别（Failure/Error 输出直接报错）
+* ✨ **record 录屏步骤**（P0-B）：`screenrecord --time-limit` 设备端录制（时长可配）→ adbkit sync pull 拉回保存目录（`Escrcpy-Record-*.mp4`）→ 远端清理；拉取失败时保留设备端文件并在日志说明
+* ✨ **launch 启动强停**（P0-B）：open_app 步骤新增「启动前强制停止」开关——`am force-stop <package>` 后再 monkey 启动
+* ✨ **loop 循环步骤**（P0-B）：子步骤容器，loopCount 次循环执行子步骤；子步骤独立享有 delayBefore/loopCount/randomRange/imageMatch
+* ✨ **condition 条件步骤**（P0-B）：三种守卫——设备在线（device_online）/ 图像存在（image_exists，复用 OpenCV TM_CCOEFF_NORMED）/ 变量比较（variable_compare，==/!=/>/</>=/<=/contains，数值自动识别）；条件不满足时子步骤整组跳过并记录
+* ✨ 工作台 UI 同步：步骤列表渲染容器子步骤（嵌套虚线行、独立增删改移）；表单支持 APK 选择、开关字段、条件子字段、子步骤管理
+* ✨ fake-adb 协议增强：sync RECV（pull）支持 + am force-stop / screenrecord / pm install / pm uninstall mock——record 步骤可端到端验证到本地 mp4
+
+### Test
+
+* ✅ e2e 扩至 **92 项全绿**（新增 S15 共 8 项：模板截图、七类步骤混合脚本、卸载+安装、录屏拉回 mp4、强停先于 monkey、循环子步骤执行次数、三守卫正确放行/跳过）
+* ✅ 单元测试 14/14；图标门禁 107/107
+
 ## [3.11.1](https://github.com/cshdotcom/escrcpy-Next/compare/v3.11.0...v3.11.1) (2026-11-25)
 
 ### Features

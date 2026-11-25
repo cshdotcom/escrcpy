@@ -13,7 +13,9 @@
  * official "step common fields" behaviour is observable in the log.
  */
 import fs from 'node:fs'
-import { dialog } from 'electron'
+import path from 'node:path'
+import dayjs from 'dayjs'
+import { app, dialog } from 'electron'
 import { ipcxMain } from '@escrcpy/electron-ipcx/main'
 import electronStore from '$electron/helpers/store/index.js'
 import { runAction, getAdbx, listOnlineDevices } from '../tasks/helpers/executor.js'
@@ -28,9 +30,16 @@ const EXPORT_VERSION = 1
 /** Step types the engine can execute (engine-native + runAction actions). */
 export const STEP_TYPES = [
   'wait', // engine-native sleep
+  'install', // engine-native: push + pm install (optional uninstall first)
+  'record', // engine-native: screenrecord + pull
+  'loop', // engine-native: container, children × loopCount
+  'condition', // engine-native: guard, children run when the condition holds
   'tap', 'swipe', 'input_text', 'key', 'shell', 'open_app', 'screenshot',
   'match_image', 'wait_image', 'http', 'notify',
 ]
+
+/** Steps that carry child steps executed by the engine itself. */
+const CONTAINER_TYPES = new Set(['loop', 'condition'])
 
 const CHANNELS = [
   'automation:subscribe',
@@ -47,6 +56,7 @@ const CHANNELS = [
   'automation:export',
   'automation:import',
   'automation:pick-template',
+  'automation:pick-apk',
 ]
 
 function ok(data = {}) {
@@ -84,13 +94,14 @@ function toNonNegativeNumber(value, fallback = 0) {
   return Number.isFinite(n) && n >= 0 ? n : fallback
 }
 
-/** Normalize one step: keeps unknown extras, enforces common field shapes. */
+/** Normalize one step: keeps unknown extras, enforces common field shapes.
+ * Container steps (loop / condition) normalize their children recursively. */
 function normalizeStep(step) {
   const type = String(step?.type || 'tap')
   if (!STEP_TYPES.includes(type))
     throw new Error(`Unknown step type: ${type}`)
 
-  return {
+  const normalized = {
     ...step,
     id: String(step?.id || uid('step')),
     name: String(step?.name || '').trim(),
@@ -111,6 +122,11 @@ function normalizeStep(step) {
         }
       : undefined,
   }
+
+  if (CONTAINER_TYPES.has(type))
+    normalized.steps = Array.isArray(step?.steps) ? step.steps.map(normalizeStep) : []
+
+  return normalized
 }
 
 function normalizeScript(script) {
@@ -259,6 +275,124 @@ function buildActionPayload(step) {
   return payload
 }
 
+const COMPARE_OPS = {
+  '==': (a, b) => a === b,
+  '!=': (a, b) => a !== b,
+  '>': (a, b) => a > b,
+  '<': (a, b) => a < b,
+  '>=': (a, b) => a >= b,
+  '<=': (a, b) => a <= b,
+  'contains': (a, b) => String(a).includes(String(b)),
+}
+
+function compareValues(left, op, right) {
+  const fn = COMPARE_OPS[op] || COMPARE_OPS['==']
+  return fn(left, right)
+}
+
+/** Official install step: optional uninstall-first, push, pm install -r. */
+async function installApk(script, step, run) {
+  const label = step.name || 'install'
+  const apkPath = String(step.apkPath || '').trim()
+  if (!apkPath || !fs.existsSync(apkPath))
+    throw new Error(`APK file not found: ${apkPath || '(empty)'}`)
+
+  if (step.uninstallBefore && step.package) {
+    const pkg = String(step.package).trim()
+    try {
+      const out = await getAdbx().shell(script.deviceId, `pm uninstall ${pkg}`)
+      pushLog(run, 'info', `[${label}] pm uninstall ${pkg}: ${String(out).trim() || '(no output)'}`)
+    }
+    catch (error) {
+      pushLog(run, 'info', `[${label}] pm uninstall ${pkg} failed (ignored): ${error?.message ?? error}`)
+    }
+  }
+
+  const remote = `/data/local/tmp/escrcpy-install-${Date.now()}.apk`
+  await getAdbx().push(script.deviceId, apkPath, remote)
+  pushLog(run, 'info', `[${label}] pushed ${path.basename(apkPath)} -> ${remote}`)
+
+  const out = await getAdbx().shell(script.deviceId, `pm install -r ${remote}`)
+  pushLog(run, 'info', `[${label}] pm install: ${String(out).trim() || '(no output)'}`)
+  if (/\b(failure|error)\b/i.test(String(out)))
+    throw new Error(`pm install failed: ${String(out).trim()}`)
+
+  try {
+    await getAdbx().shell(script.deviceId, `rm -f ${remote}`)
+  }
+  catch { /* best-effort cleanup */ }
+  return `installed ${path.basename(apkPath)}`
+}
+
+/** Official record step: screenrecord on device, pull the file to saveDir. */
+async function recordScreen(script, step, run) {
+  const label = step.name || 'record'
+  const seconds = Math.min(180, Math.max(1, Math.floor(Number(step.duration) || 10)))
+  const remote = `/sdcard/escrcpy-record-${dayjs().format('YYYYMMDD-HHmmss')}.mp4`
+
+  const out = await getAdbx().shell(script.deviceId, `screenrecord --time-limit ${seconds} ${remote}`)
+  if (/\b(error|failed)\b/i.test(String(out)))
+    throw new Error(`screenrecord failed: ${String(out).trim()}`)
+  pushLog(run, 'info', `[${label}] recorded ${seconds}s -> ${remote}`)
+
+  const dir = String(step.saveDir || '').trim() || path.join(app.getPath('videos'), 'Escrcpy-Automation')
+  fs.mkdirSync(dir, { recursive: true })
+  const savePath = path.join(dir, `Escrcpy-Record-${dayjs().format('YYYY-MM-DD-HH-mm-ss')}.mp4`)
+
+  try {
+    const buffer = await getAdbx().fileManager.pullBuffer(script.deviceId, remote)
+    fs.writeFileSync(savePath, buffer)
+    pushLog(run, 'ok', `[${label}] recording saved: ${savePath} (${buffer.length} bytes)`)
+    try {
+      await getAdbx().shell(script.deviceId, `rm -f ${remote}`)
+    }
+    catch { /* best-effort cleanup */ }
+  }
+  catch (error) {
+    // Pull failures keep the recording on the device rather than failing the
+    // run — the shell log above shows where to find it.
+    pushLog(run, 'info', `[${label}] pull failed — recording kept on device at ${remote} (${error?.message ?? error})`)
+  }
+  return `record ${seconds}s`
+}
+
+/** Official condition step guard: image / device / variable. */
+async function evaluateCondition(script, step, run) {
+  const kind = String(step.conditionType || 'device_online')
+  let result = false
+  let detail = ''
+
+  if (kind === 'image_exists') {
+    const templatePath = String(step.templatePath || '').trim()
+    if (!templatePath)
+      throw new Error('image_exists condition requires a template path')
+    const match = await matchOnDevice(getAdbx(), script.deviceId, templatePath, {
+      threshold: Number(step.threshold) || 0.8,
+    })
+    result = match.matched
+    detail = `score ${match.score}`
+  }
+  else if (kind === 'variable_compare') {
+    const variable = (script.variables || []).find(v => String(v.name) === String(step.varName || ''))
+    const left = String(variable?.value ?? '')
+    const right = String(step.varValue ?? '')
+    const op = String(step.varOp || '==')
+    const ln = Number(left)
+    const rn = Number(right)
+    const numeric = left.trim() !== '' && right.trim() !== '' && Number.isFinite(ln) && Number.isFinite(rn)
+    result = compareValues(numeric ? ln : left, op, numeric ? rn : right)
+    detail = `${step.varName || '(undefined)'}(${left}) ${op} ${right}`
+  }
+  else {
+    const devices = await listOnlineDevices()
+    result = devices.some(device => String(device.id) === String(script.deviceId))
+    detail = `${devices.length} device(s) online`
+  }
+
+  pushLog(run, 'info', `[${step.name || 'condition'}] ${kind} = ${result} (${detail})`)
+  return result
+}
+
 async function executeStep(script, step, run) {
   const control = run.control
   const label = step.name || step.type
@@ -286,7 +420,43 @@ async function executeStep(script, step, run) {
         continue
       }
 
+      // Container steps: loop runs the children every iteration; condition
+      // evaluates the guard first and skips the children when it does not
+      // hold. The outer iteration loop already honours loopCount.
+      if (step.type === 'loop' || step.type === 'condition') {
+        if (step.type === 'condition') {
+          const holds = await evaluateCondition(script, step, run)
+          if (!holds) {
+            pushLog(run, 'info', `[${label}] condition not met — ${(step.steps || []).length} child step(s) skipped`)
+            continue
+          }
+        }
+        for (const child of step.steps || []) {
+          await waitGate(control)
+          if (control.aborted)
+            return
+          await executeStep(script, child, run)
+        }
+        continue
+      }
+
+      if (step.type === 'install') {
+        pushLog(run, 'ok', `[${label}] ${await installApk(script, step, run)}`)
+        continue
+      }
+
+      if (step.type === 'record') {
+        pushLog(run, 'ok', `[${label}] ${await recordScreen(script, step, run)}`)
+        continue
+      }
+
       const payload = buildActionPayload(step)
+
+      // Official launch step: force-stop the package before launching.
+      if (step.type === 'open_app' && step.forceStop && step.package) {
+        await getAdbx().shell(script.deviceId, `am force-stop ${String(step.package).trim()}`)
+        pushLog(run, 'info', `[${label}] force-stopped ${String(step.package).trim()}`)
+      }
 
       // Official "匹配点跟随": resolve the match once here and override the
       // tap coordinates, then drop imageMatch so runAction does not re-match.
@@ -609,6 +779,20 @@ export default {
       }
       catch (error) {
         return fail(error, 'AUTOMATION_PICK_TEMPLATE')
+      }
+    })
+
+    ipcxMain.handle('automation:pick-apk', async () => {
+      try {
+        const result = await dialog.showOpenDialog({
+          title: 'Select APK',
+          properties: ['openFile'],
+          filters: [{ name: 'Android Package', extensions: ['apk'] }],
+        })
+        return ok({ filePath: result.canceled ? '' : result.filePaths[0] })
+      }
+      catch (error) {
+        return fail(error, 'AUTOMATION_PICK_APK')
       }
     })
 
