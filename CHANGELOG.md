@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.11.1](https://github.com/cshdotcom/escrcpy-Next/compare/v3.11.0...v3.11.1) (2026-11-25)
+
+### Features
+
+* ✨ **自动化脚本工作台（P0-A，官方 automation 页对齐）**：新增独立窗口页面 `pages/automation`（设备页「更多」菜单首项入口）——左侧脚本列表（按设备隔离，electron-store 持久化）/ 中间步骤列表（HTML5 拖拽排序、上移下移、复制、前/后插入、删除、批量勾选）/ 右侧步骤编辑表单（12 种步骤类型按官方三分组：基础 / 条件 / 扩展）/ 底部执行日志面板（清空、自动滚动、事件实时推送）
+* ✨ **执行引擎**：单步 / 执行选中 / 全量执行；暂停 / 继续 / 停止；状态机 idle→running⇄paused→stopped；同一脚本不可并发；切换脚本先停止（二次确认）；执行日志逐条记录（含 loopCount 迭代序号 `[2/2]`、delayBefore 实际延时、randomRange 偏移后坐标）
+* ✨ **步骤公共字段全部生效**：delayBefore / loopCount / randomRange（官方语义：每次循环坐标 ±n×5px、时间 ±n×500ms，0 禁用，日志打印实际值）
+* ✨ **识图判断（imageMatch）挂任意步骤**：模板路径选择对话框 / 匹配阈值 / 未匹配跳过 / **匹配点跟随**（Tap 坐标自动跟随实际匹配中心，官方 followMatchPoint 语义）
+* ✨ **wait 等待步骤**：引擎原生（executor 此前缺失的步骤类型）；暂停可中断等待中的步骤
+* ✨ **脚本导入导出**：JSON 格式（format: escrcpy-automation-script），导入替换当前脚本步骤需确认；支持编程化 filePath（e2e/自动化用）
+* ✨ **按键预设**：back / home / menu / enter / del / power / app_switch / notification / volume± 一键填入 keyCode
+
+### Test
+
+* ✅ e2e 扩至 **84 项全绿**（新增 S14 共 11 项：设备列表、四步脚本「启动→点击(×2)→输入→截图」全量执行、单步执行隔离、暂停保持与恢复完成、长等待中停止、导出导入步骤一致、vite 入口注册门禁——防 group-control 白窗级生产 bug）
+* ✅ 图标门禁 104/104（新页面 16 个 solar 图标全部预检通过）
+
+
 ## [3.11.0](https://github.com/cshdotcom/escrcpy-Next/compare/v3.10.2...v3.11.0) (2026-11-25)
 
 ### Documentation

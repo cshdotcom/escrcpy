@@ -74,6 +74,7 @@ export default defineConfig((args) => {
             terminal: resolve('pages/terminal/index.html'),
             'group-control': resolve('pages/group-control/index.html'),
             mirror: resolve('pages/mirror/index.html'),
+            automation: resolve('pages/automation/index.html'),
           },
           output: {
             manualChunks(id) {

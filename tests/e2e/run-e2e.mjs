@@ -1165,6 +1165,261 @@ async function main() {
   const webPageWf = await fetch(`http://127.0.0.1:${WEB_PORT}/`, { headers: { cookie: `escrcpy_web=${cookieToken}` } }).then(r => r.text()).catch(() => '')
   check('S13.4 web page renders the workflow chain panel', webPageWf.includes('workflow-list') && webPageWf.includes('refreshWorkflows'), `len=${webPageWf.length}`)
 
+  // ════════ S14 · v3.11.1: automation script workbench (自动化脚本工作台) ════════
+  console.log('\n[S14] automation script workbench (自动化脚本工作台)')
+
+  const automationDevices = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:devices')
+    return JSON.stringify(r)
+  })()`)
+  let automationDeviceOk = false
+  try {
+    automationDeviceOk = (JSON.parse(automationDevices)?.devices || []).some(d => d.id === 'E2ETEST001')
+  }
+  catch {}
+  check('S14.1 automation:devices lists fake devices', automationDeviceOk, automationDevices.slice(0, 140))
+
+  const AUTOMATION_SAVE_DIR = '/tmp/e2e-automation'
+  fs.rmSync(AUTOMATION_SAVE_DIR, { recursive: true, force: true })
+
+  // 4-step script: launch app -> tap (delay+loop) -> input text -> screenshot
+  const scriptSaveRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: {
+      id: '', deviceId: 'E2ETEST001', name: 'E2E four-step script',
+      variables: [],
+      steps: [
+        { id: 'st_launch', type: 'open_app', name: 'launch', package: 'com.android.settings' },
+        { id: 'st_tap', type: 'tap', name: 'tap', x: 321, y: 123, delayBefore: 100, loopCount: 2 },
+        { id: 'st_input', type: 'input_text', name: 'input', text: 'e2e-automation' },
+        { id: 'st_shot', type: 'screenshot', name: 'shot', saveDir: '${AUTOMATION_SAVE_DIR}' },
+      ],
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let scriptId = ''
+  let scriptSavedOk = false
+  try {
+    const parsed = JSON.parse(scriptSaveRes)
+    scriptId = parsed?.script?.id || ''
+    scriptSavedOk = Boolean(parsed?.success && scriptId && parsed.script.steps.length === 4)
+  }
+  catch {}
+  check('S14.2 automation:script:save creates the 4-step script', scriptSavedOk, scriptSaveRes.slice(0, 160))
+
+  const runAllRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(scriptId)}, mode: 'all' })
+    return JSON.stringify(r)
+  })()`)
+  let runAllStarted = false
+  try {
+    runAllStarted = JSON.parse(runAllRes)?.success === true
+  }
+  catch {}
+  check('S14.3 automation:script:run starts the full run', runAllStarted, runAllRes.slice(0, 140))
+
+  let finalStatus = null
+  try {
+    finalStatus = await waitFor(async () => {
+      const res = await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(scriptId)} })
+        return JSON.stringify(r)
+      })()`)
+      const parsed = JSON.parse(res)
+      if (parsed?.run?.state === 'idle' && parsed?.run?.logCount > 0)
+        return parsed
+      return null
+    }, { timeoutMs: 30000, label: 'automation run completion' })
+  }
+  catch {}
+  check('S14.4 full run completes (idle) with logs', Boolean(finalStatus), JSON.stringify(finalStatus?.run || {}).slice(0, 140))
+
+  let runLogs = []
+  try {
+    const logsRes = await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:logs', { scriptId: ${JSON.stringify(scriptId)}, since: 0 })
+      return JSON.stringify(r)
+    })()`)
+    runLogs = JSON.parse(logsRes)?.logs || []
+  }
+  catch {}
+  const sawLaunch = runLogs.some(l => String(l.text).includes('launch app'))
+  const sawTapLoop = runLogs.some(l => String(l.text).includes('[2/2]') && String(l.text).includes('tap'))
+  const sawInput = runLogs.some(l => String(l.text).includes('input text'))
+  const sawShot = runLogs.some(l => String(l.text).includes('screenshot saved'))
+  check('S14.5 log records every step (launch, tap loop 2/2, input, screenshot)',
+    sawLaunch && sawTapLoop && sawInput && sawShot,
+    runLogs.slice(-6).map(l => String(l.text).slice(0, 60)).join(' | '))
+
+  const shotFiles = fs.existsSync(AUTOMATION_SAVE_DIR)
+    ? fs.readdirSync(AUTOMATION_SAVE_DIR).filter(f => f.endsWith('.png')) : []
+  check('S14.6 screenshot artifact written to saveDir', shotFiles.length > 0, `${AUTOMATION_SAVE_DIR}: ${shotFiles.join(',')}`)
+
+  // single-step run: only the tap step executes (fresh log scope)
+  const singleRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(scriptId)}, mode: 'step', stepIds: ['st_tap'] })
+    return JSON.stringify(r)
+  })()`)
+  let singleOk = false
+  let singleDetail = singleRes.slice(0, 140)
+  try {
+    await waitFor(async () => {
+      const res = await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(scriptId)} })
+        return JSON.stringify(r)
+      })()`)
+      return JSON.parse(res)?.run?.state === 'idle'
+    }, { timeoutMs: 15000, label: 'single-step completion' })
+    const logsRes = await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:logs', { scriptId: ${JSON.stringify(scriptId)}, since: 0 })
+      return JSON.stringify(r)
+    })()`)
+    const logs = JSON.parse(logsRes)?.logs || []
+    singleOk = JSON.parse(singleRes)?.success === true
+      && logs.some(l => String(l.text).includes('run started (step, 1 step)'))
+      && !logs.some(l => String(l.text).includes('launch app'))
+    singleDetail = logs.map(l => String(l.text).slice(0, 50)).join(' | ')
+  }
+  catch (error) {
+    singleDetail = error?.message ?? String(error)
+  }
+  check('S14.7 single-step run executes only the selected step', singleOk, singleDetail)
+
+  // pause / resume with a wait step
+  const pauseScriptRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: {
+      id: '', deviceId: 'E2ETEST001', name: 'E2E pause probe', variables: [],
+      steps: [
+        { id: 'pw_wait', type: 'wait', name: 'hold', waitMs: 5000 },
+        { id: 'pw_tap', type: 'tap', name: 'after', x: 10, y: 20 },
+      ],
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let pauseScriptId = ''
+  try {
+    pauseScriptId = JSON.parse(pauseScriptRes)?.script?.id || ''
+  }
+  catch {}
+  let pauseFlowOk = false
+  let pauseDetail = ''
+  try {
+    await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(pauseScriptId)}, mode: 'all' })
+      return JSON.stringify(r)
+    })()`)
+    await sleep(700)
+    const pauseRes = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:pause', { scriptId: ${JSON.stringify(pauseScriptId)} })
+      return JSON.stringify(r)
+    })()`))
+    const pausedState = pauseRes?.run?.state
+    await sleep(600)
+    const stillPaused = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(pauseScriptId)} })
+      return JSON.stringify(r)
+    })()`))
+    await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:resume', { scriptId: ${JSON.stringify(pauseScriptId)} })
+      return JSON.stringify(r)
+    })()`)
+    await waitFor(async () => {
+      const res = JSON.parse(await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(pauseScriptId)} })
+        return JSON.stringify(r)
+      })()`))
+      return res?.run?.state === 'idle'
+    }, { timeoutMs: 20000, label: 'pause-script completion' })
+    const pauseLogs = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:logs', { scriptId: ${JSON.stringify(pauseScriptId)}, since: 0 })
+      return JSON.stringify(r)
+    })()`))
+    const texts = (pauseLogs?.logs || []).map(l => String(l.text))
+    pauseFlowOk = pausedState === 'paused' && stillPaused?.run?.state === 'paused'
+      && texts.some(t => t.includes('run paused')) && texts.some(t => t.includes('run resumed'))
+      && texts.some(t => t.includes('run done'))
+    pauseDetail = `paused=${pausedState} still=${stillPaused?.run?.state} logs=${texts.length}`
+  }
+  catch (error) {
+    pauseDetail = error?.message ?? String(error)
+  }
+  check('S14.8 pause holds the run and resume completes it', pauseFlowOk, pauseDetail)
+
+  // stop mid-wait
+  const stopScriptRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: {
+      id: '', deviceId: 'E2ETEST001', name: 'E2E stop probe', variables: [],
+      steps: [{ id: 'sw_wait', type: 'wait', name: 'long', waitMs: 20000 }],
+    } })
+    return JSON.stringify(r)
+  })()`)
+  let stopScriptId = ''
+  try {
+    stopScriptId = JSON.parse(stopScriptRes)?.script?.id || ''
+  }
+  catch {}
+  let stopOk = false
+  try {
+    await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:run', { scriptId: ${JSON.stringify(stopScriptId)}, mode: 'all' })
+      return JSON.stringify(r)
+    })()`)
+    await sleep(600)
+    await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:stop', { scriptId: ${JSON.stringify(stopScriptId)} })
+      return JSON.stringify(r)
+    })()`)
+    const stopped = await waitFor(async () => {
+      const res = JSON.parse(await main2.evaluate(`(async () => {
+        const r = await window.$preload.ipcxRenderer.invoke('automation:script:status', { scriptId: ${JSON.stringify(stopScriptId)} })
+        return JSON.stringify(r)
+      })()`))
+      return res?.run?.state === 'stopped' ? res : null
+    }, { timeoutMs: 5000, label: 'stopped state' })
+    stopOk = Boolean(stopped)
+  }
+  catch {}
+  check('S14.9 stop interrupts a long wait (state stopped)', stopOk, '')
+
+  // export -> import round-trip
+  const EXPORT_PATH = '/tmp/e2e-automation/exported.json'
+  const exportRes = await main2.evaluate(`(async () => {
+    const r = await window.$preload.ipcxRenderer.invoke('automation:export', { scriptId: ${JSON.stringify(scriptId)}, filePath: ${JSON.stringify(EXPORT_PATH)} })
+    return JSON.stringify(r)
+  })()`)
+  let roundTripOk = false
+  let roundTripDetail = ''
+  try {
+    const exportedOk = JSON.parse(exportRes)?.success === true && fs.existsSync(EXPORT_PATH)
+    const importedRes = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:import', { filePath: ${JSON.stringify(EXPORT_PATH)} })
+      return JSON.stringify(r)
+    })()`))
+    const importedScriptJson = JSON.stringify(importedRes?.script)
+    const savedRes = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:script:save', { script: ${importedScriptJson} })
+      return JSON.stringify(r)
+    })()`))
+    const listRes = JSON.parse(await main2.evaluate(`(async () => {
+      const r = await window.$preload.ipcxRenderer.invoke('automation:scripts:list', { deviceId: 'E2ETEST001' })
+      return JSON.stringify(r)
+    })()`))
+    const scriptsList = listRes?.scripts || []
+    const importedSaved = scriptsList.find(s => s.id === savedRes?.script?.id)
+    const originalSaved = scriptsList.find(s => s.id === scriptId)
+    roundTripOk = exportedOk && importedRes?.script?.steps?.length === 4
+      && Boolean(importedSaved && originalSaved)
+      && JSON.stringify(importedSaved.steps) === JSON.stringify(originalSaved.steps)
+    roundTripDetail = `exported=${exportedOk} importedSteps=${importedRes?.script?.steps?.length} identicalSteps=${JSON.stringify(importedSaved?.steps) === JSON.stringify(originalSaved?.steps)}`
+  }
+  catch (error) {
+    roundTripDetail = error?.message ?? String(error)
+  }
+  check('S14.10 export/import round-trip preserves the script', roundTripOk, roundTripDetail)
+
+  // the automation page must be registered in the vite build (blank-window bug guard)
+  const automationPageBuilt = fs.existsSync(path.join(REPO, 'desktop/dist/pages/automation/index.html'))
+  check('S14.11 automation page registered in vite build (dist artifact exists)', automationPageBuilt, 'desktop/dist/pages/automation/index.html')
+
   // teardown
   main.close(); main2.close(); copilot.close(); copilot2.close()
   console.log(`\n== ${results.filter(r => r.ok).length}/${results.length} checks passed ==`)

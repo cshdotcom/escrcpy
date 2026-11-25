@@ -45,6 +45,7 @@ import Camera from './components/camera/index.vue'
 import Otg from './components/otg/index.vue'
 import Custom from './components/custom/index.vue'
 import MirrorInset from './components/mirror/index.vue'
+import Automation from './components/automation/index.vue'
 import MirrorGroup from './components/mirror-group/index.vue'
 
 const props = defineProps({
@@ -56,6 +57,10 @@ const props = defineProps({
 
 const options = computed(() => {
   return [
+    {
+      label: 'automation.name',
+      component: Automation,
+    },
     {
       label: 'device.actions.more.mirror.inset',
       component: MirrorInset,
